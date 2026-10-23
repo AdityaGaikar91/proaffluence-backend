@@ -292,6 +292,45 @@ curl -i -X POST http://localhost:8002/api/auth/sign-up/email \
 
 ---
 
+### 8. Password Reset Flow (Forgot & Reset Password)
+
+#### Step A: Request Reset Link
+```bash
+curl -X POST http://localhost:8002/api/auth/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "staff1@proaffluence.com",
+    "redirectTo": "http://localhost:3000/reset-password"
+  }'
+```
+**Response (200 OK):**
+```json
+{
+  "status": true,
+  "message": "If this email exists in our system, a password reset link has been sent."
+}
+```
+*(In development without SMTP, the clickable link with token is printed directly to the server terminal).*
+
+#### Step B: Complete Password Reset
+```bash
+curl -X POST http://localhost:8002/api/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "<TOKEN_FROM_EMAIL_OR_TERMINAL>",
+    "newPassword": "NewSecurePassword2026!"
+  }'
+```
+**Response (200 OK):**
+```json
+{
+  "status": true,
+  "message": "Password has been reset successfully. Please log in with your new password."
+}
+```
+
+---
+
 ## Running Tests
 
 Run the end-to-end authentication test suite:

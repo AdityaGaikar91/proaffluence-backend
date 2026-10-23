@@ -31,8 +31,19 @@ describe('Auth & Session Management (e2e)', () => {
     });
 
     app.use(cookieParser());
-    // Mount Better Auth handler before body parsing middleware
-    app.use('/api/auth', toNodeHandler(auth));
+    const authHandler = toNodeHandler(auth);
+    // Mount Better Auth handler while letting custom NestJS password reset routes pass through
+    app.use('/api/auth', (req, res, next) => {
+      if (
+        req.path === '/forgot-password' ||
+        req.path === '/reset-password' ||
+        req.path.startsWith('/forgot-password?') ||
+        req.path.startsWith('/reset-password?')
+      ) {
+        return next();
+      }
+      return authHandler(req, res);
+    });
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     app.useGlobalPipes(
@@ -193,6 +204,138 @@ describe('Auth & Session Management (e2e)', () => {
       }
 
       expect(hitRateLimit).toBe(true);
+    });
+  });
+
+  describe('Password Reset Flow', () => {
+    const testUser = seedUsers.find((u: any) => u.role === 'staff_entry') || seedUsers[1];
+    let resetToken: string;
+
+    it('should reject forgot-password with malformed email (class-validator)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/forgot-password')
+        .send({ email: 'not-an-email' });
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain('valid email address');
+    });
+
+    it('should return generic success on forgot-password for non-existent email (anti-enumeration)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/forgot-password')
+        .send({ email: 'does-not-exist@proaffluence.com' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe(true);
+      expect(res.body.message).toContain('If this email exists in our system');
+    });
+
+    it('should process forgot-password for valid email and create verification token', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/forgot-password')
+        .send({
+          email: testUser.email,
+          redirectTo: 'http://localhost:3000/reset-password',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe(true);
+
+      // Verify token exists in PostgreSQL database
+      const dbUser = await prisma.user.findUnique({
+        where: { email: testUser.email },
+      });
+      expect(dbUser).toBeDefined();
+
+      const verification = await prisma.verification.findFirst({
+        where: { value: dbUser!.id },
+      });
+      expect(verification).toBeDefined();
+      expect(verification!.identifier).toMatch(/^reset-password:/);
+
+      resetToken = verification!.identifier.replace('reset-password:', '');
+      expect(resetToken.length).toBeGreaterThan(10);
+    });
+
+    it('should reject reset-password with password shorter than 8 chars (class-validator)', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/reset-password')
+        .send({
+          token: resetToken,
+          newPassword: 'short',
+        });
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain('at least 8 characters');
+    });
+
+    it('should reject reset-password with an invalid token', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/reset-password')
+        .send({
+          token: 'invalid-token-12345',
+          newPassword: 'ValidNewPassword2026!',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toContain('Invalid or expired password reset token');
+    });
+
+    it('should successfully reset password with valid token, consume token, and allow sign-in', async () => {
+      const newPassword = 'BrandNewPassword2026!';
+
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/reset-password')
+        .send({
+          token: resetToken,
+          newPassword,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe(true);
+
+      // Verify token is consumed (deleted)
+      const consumed = await prisma.verification.findFirst({
+        where: { identifier: `reset-password:${resetToken}` },
+      });
+      expect(consumed).toBeNull();
+
+      // Attempting to reuse the same token should fail
+      const reuseRes = await request(app.getHttpServer())
+        .post('/api/auth/reset-password')
+        .send({
+          token: resetToken,
+          newPassword: 'AnotherPassword2026!',
+        });
+      expect(reuseRes.status).toBe(400);
+
+      // Sign-in with old password should fail
+      const oldLoginRes = await request(app.getHttpServer())
+        .post('/api/auth/sign-in/email')
+        .send({
+          email: testUser.email,
+          password: testUser.password,
+        });
+      expect(oldLoginRes.status).toBe(401);
+
+      // Sign-in with new password should succeed
+      const newLoginRes = await request(app.getHttpServer())
+        .post('/api/auth/sign-in/email')
+        .send({
+          email: testUser.email,
+          password: newPassword,
+        });
+      expect(newLoginRes.status).toBe(200);
+      expect(newLoginRes.headers['set-cookie']).toBeDefined();
+
+      // Restore original password to keep test environment idempotent
+      const ctx = await auth.$context;
+      const originalHash = await ctx.password.hash(testUser.password);
+      const dbUser = await prisma.user.findUnique({ where: { email: testUser.email } });
+      await prisma.account.updateMany({
+        where: { userId: dbUser!.id, providerId: 'credential' },
+        data: { password: originalHash },
+      });
     });
   });
 });

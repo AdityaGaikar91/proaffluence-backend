@@ -54,8 +54,21 @@ async function bootstrap() {
   // Cookie parser
   app.use(cookieParser());
 
-  // Mount Better Auth handler BEFORE body parser middleware
-  app.use('/api/auth', toNodeHandler(auth));
+  const authHandler = toNodeHandler(auth);
+
+  // Mount Better Auth handler BEFORE body parser middleware,
+  // while allowing custom NestJS password reset routes to pass through to NestJS
+  app.use('/api/auth', (req, res, next) => {
+    if (
+      req.path === '/forgot-password' ||
+      req.path === '/reset-password' ||
+      req.path.startsWith('/forgot-password?') ||
+      req.path.startsWith('/reset-password?')
+    ) {
+      return next();
+    }
+    return authHandler(req, res);
+  });
 
   // Mount standard body parsers with strict 100kb payload size limit
   app.use(express.json({ limit: '100kb' }));

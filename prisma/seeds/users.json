@@ -2,21 +2,28 @@
   {
     "email": "admin1@proaffluence.com",
     "name": "Super Admin One",
-    "password": "@Admin123",
+    "password": "@Test123",
     "role": "super_admin",
     "emailVerified": true
   },
   {
     "email": "admin2@proaffluence.com",
     "name": "Super Admin Two",
-    "password": "@Admin123",
+    "password": "@Test123",
     "role": "super_admin",
     "emailVerified": true
   },
   {
     "email": "staff1@proaffluence.com",
     "name": "Staff Entry User One",
-    "password": "@Admin123",
+    "password": "@Test123",
+    "role": "staff_entry",
+    "emailVerified": true
+  },
+  {
+    "email": "xawegi3262@goldvester.com",
+    "name": "Rahul Patil",
+    "password": "@Test123",
     "role": "staff_entry",
     "emailVerified": true
   }

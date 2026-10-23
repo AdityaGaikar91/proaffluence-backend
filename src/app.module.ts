@@ -4,6 +4,7 @@ import { validate } from './core/config/env.validation';
 import { appConfig } from './core/config/app.config';
 import { authConfig } from './core/config/auth.config';
 import { PrismaModule } from './core/prisma/prisma.module';
+import { MailModule } from './core/mail/mail.module';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { MeModule } from './me/me.module';
@@ -16,6 +17,7 @@ import { MeModule } from './me/me.module';
       load: [appConfig, authConfig],
     }),
     PrismaModule,
+    MailModule,
     AuthModule,
     HealthModule,
     MeModule,

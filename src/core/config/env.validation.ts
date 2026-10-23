@@ -74,6 +74,30 @@ export class EnvironmentVariables {
   @IsBoolean()
   @IsOptional()
   SWAGGER_ENABLED: boolean = true;
+
+  @IsString()
+  @IsOptional()
+  SMTP_HOST?: string;
+
+  @IsNumber()
+  @IsOptional()
+  SMTP_PORT?: number = 587;
+
+  @IsString()
+  @IsOptional()
+  SMTP_USER?: string;
+
+  @IsString()
+  @IsOptional()
+  SMTP_PASS?: string;
+
+  @IsString()
+  @IsOptional()
+  SMTP_FROM?: string = 'ProAffluence <noreply@proaffluence.com>';
+
+  @IsBoolean()
+  @IsOptional()
+  SMTP_SECURE?: boolean = false;
 }
 
 export function validate(config: Record<string, unknown>) {
