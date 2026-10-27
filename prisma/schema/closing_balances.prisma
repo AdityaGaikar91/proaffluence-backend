@@ -1,0 +1,48 @@
+// =============================================================================
+// DOMAIN: CLOSING BALANCES SPREADSHEET MATRIX
+// =============================================================================
+
+model ClosingBalance {
+  id                 String          @id @default(uuid())
+  srNo               Int             @map("sr_no")
+  dateOfEntry        String          @map("date_of_entry") // "dd-MM-yyyy"
+  userId             String          @map("user_id")
+  monthKey           String          @map("month_key")     // "YYYY-MM" (e.g. "2026-09")
+  month              String                                // "September 2026"
+
+  groupHeadId        String          @map("group_head_id")
+  groupHead          GroupHead       @relation(fields: [groupHeadId], references: [id], onDelete: Restrict)
+  groupHeadName      String          @map("group_head_name")
+
+  familyMemberId     String?         @map("family_member_id")
+  familyMember       FamilyMember?   @relation(fields: [familyMemberId], references: [id], onDelete: SetNull)
+  familyMemberName   String          @map("family_member_name")
+
+  category           AssetCategory
+  subCategory        String          @map("sub_category")
+  closingAmount      Decimal?        @map("closing_amount") @db.Decimal(18, 2) // Nullable if missing
+
+  voided             Boolean         @default(false)
+  approvalStatus     ApprovalStatus  @default(PENDING) @map("approval_status")
+  returnReason       String?         @map("return_reason")
+
+  submittedById      String          @map("submitted_by_id")
+  submittedBy        User            @relation("BalanceSubmitter", fields: [submittedById], references: [id])
+  submittedByName    String          @map("submitted_by_name")
+  submittedAt        DateTime        @default(now()) @map("submitted_at")
+
+  approvedById       String?         @map("approved_by_id")
+  approvedBy         User?           @relation("BalanceApprover", fields: [approvedById], references: [id])
+  approvedByName     String?         @map("approved_by_name")
+  approvedAt         DateTime?       @map("approved_at")
+
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  auditEntries       AuditTrail[]    @relation("BalanceAudits")
+
+  @@unique([monthKey, groupHeadId, familyMemberName, category, subCategory])
+  @@index([monthKey])
+  @@index([approvalStatus])
+  @@map("closing_balances")
+}

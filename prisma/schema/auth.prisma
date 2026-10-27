@@ -1,11 +1,6 @@
-generator client {
-  provider = "prisma-client-js"
-}
-
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+// =============================================================================
+// BETTER-AUTH AUTHENTICATION MODELS
+// =============================================================================
 
 model User {
   id            String    @id @default(uuid())
@@ -15,7 +10,7 @@ model User {
   image         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  
+
   // Admin plugin fields
   role          String?   @default("staff_entry")
   banned        Boolean?  @default(false)
@@ -24,6 +19,15 @@ model User {
 
   sessions      Session[]
   accounts      Account[]
+
+  // Domain Relations
+  submittedCashflows MasterCashflow[] @relation("CashflowSubmitter")
+  approvedCashflows  MasterCashflow[] @relation("CashflowApprover")
+  submittedBalances  ClosingBalance[] @relation("BalanceSubmitter")
+  approvedBalances   ClosingBalance[] @relation("BalanceApprover")
+  auditEntries       AuditTrail[]     @relation("AuditUser")
+  frozenRuns         ReportingRun[]   @relation("RunFreezer")
+  unfrozenRuns       ReportingRun[]   @relation("RunUnfreezer")
 
   @@map("users")
 }

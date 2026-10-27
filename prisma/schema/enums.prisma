@@ -1,0 +1,63 @@
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum ApprovalStatus {
+  PENDING  @map("Pending")
+  APPROVED @map("Approved")
+  RETURNED @map("Rejected/Returned")
+}
+
+enum TransactionType {
+  PURCHASE   @map("Purchase")
+  REDEMPTION @map("Redemption")
+}
+
+enum AssetCategory {
+  MF     @map("MF")
+  PMS    @map("PMS")
+  STOCKS @map("Stocks")
+  EQUITY @map("Equity")
+  DEBT   @map("Debt")
+  OTHER  @map("Other")
+}
+
+enum BenchmarkCode {
+  NIFTY_50_TRI @map("NIFTY_50_TRI")
+  NIFTY_50_PR  @map("NIFTY_50_PR")
+  BSE_500      @map("BSE_500")
+  SENSEX       @map("SENSEX")
+}
+
+enum BenchmarkReturnType {
+  TRI
+  PR
+}
+
+enum QuoteSource {
+  FEED        @map("feed")
+  MANUAL      @map("manual")
+  BULK_UPLOAD @map("bulk_upload")
+}
+
+enum EmailCampaignStatus {
+  DRAFT     @map("Draft")
+  READY     @map("Ready")
+  APPROVED  @map("Approved")
+  QUEUED    @map("Queued")
+  SENT      @map("Sent")
+  DELIVERED @map("Delivered")
+  FAILED    @map("Failed")
+  BOUNCED   @map("Bounced")
+}
+
+enum AuditAction {
+  CREATED   @map("Created")
+  CORRECTED @map("Corrected")
+  VOIDED    @map("Voided")
+  APPROVED  @map("Approved")
+  RETURNED  @map("Returned")
+  IMPORTED  @map("Imported")
+  FROZEN    @map("Frozen")
+  UNFROZEN  @map("Unfrozen")
+}

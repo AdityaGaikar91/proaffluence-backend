@@ -1,0 +1,53 @@
+// =============================================================================
+// DOMAIN: EMAIL DISPATCH & DELIVERY AUDIT HUB
+// =============================================================================
+
+model EmailCampaign {
+  id                 String              @id @default(uuid())
+  groupHeadId        String              @map("group_head_id")
+  groupHead          GroupHead           @relation(fields: [groupHeadId], references: [id], onDelete: Cascade)
+  reportDate         String              @map("report_date") // "30-09-2026"
+  status             EmailCampaignStatus @default(DRAFT)
+
+  approvedById       String?             @map("approved_by_id")
+  approvedByName     String?             @map("approved_by_name")
+  approvedAt         DateTime?           @map("approved_at")
+  queuedAt           DateTime?           @map("queued_at")
+  sentAt             DateTime?           @map("sent_at")
+  deliveredAt        DateTime?           @map("delivered_at")
+  failedAt           DateTime?           @map("failed_at")
+  failureReason      String?             @map("failure_reason")
+  bounceCode         String?             @map("bounce_code")
+  providerMessageId  String?             @map("provider_message_id")
+  retryCount         Int                 @default(0) @map("retry_count")
+
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  deliveryLogs       DeliveryLog[]
+
+  @@unique([groupHeadId, reportDate])
+  @@index([status])
+  @@map("email_campaigns")
+}
+
+model DeliveryLog {
+  id                 String              @id @default(uuid())
+  campaignId         String              @map("campaign_id")
+  campaign           EmailCampaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  groupHeadId        String              @map("group_head_id")
+  clientName         String              @map("client_name")
+  recipientEmail     String              @map("recipient_email")
+  attachmentFilename String              @map("attachment_filename")
+  status             EmailCampaignStatus
+  timestamp          DateTime            @default(now())
+  provider           String              // "AWS SES Relay"
+  providerMessageId  String?             @map("provider_message_id")
+  failureReason      String?             @map("failure_reason")
+  bounceCode         String?             @map("bounce_code")
+  retryCount         Int                 @default(0) @map("retry_count")
+
+  @@index([campaignId])
+  @@index([recipientEmail])
+  @@map("delivery_logs")
+}

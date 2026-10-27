@@ -1,0 +1,57 @@
+// =============================================================================
+// DOMAIN: MASTER CASHFLOWS LEDGER
+// =============================================================================
+
+model MasterCashflow {
+  id                 String          @id @default(uuid())
+  srNo               Int             @unique @map("sr_no") // Auto-sequenced positive integer
+  dateOfEntry        String          @map("date_of_entry") // "dd-MM-yyyy"
+  userId             String          @map("user_id")       // "USR-001"
+  month              String                                // "October 2026"
+  clientOwner        String          @map("client_owner")  // RM Name
+
+  groupHeadId        String          @map("group_head_id")
+  groupHead          GroupHead       @relation(fields: [groupHeadId], references: [id], onDelete: Restrict)
+  groupHeadName      String          @map("group_head_name") // Denormalized for fast template sync
+
+  familyMemberId     String?         @map("family_member_id")
+  familyMember       FamilyMember?   @relation(fields: [familyMemberId], references: [id], onDelete: SetNull)
+  familyMemberName   String          @map("family_member_name")
+
+  transactionDate    String          @map("transaction_date") // "dd-MM-yyyy"
+  transactionType    TransactionType @map("transaction_type") // Purchase | Redemption
+  category           AssetCategory
+  subCategory        String          @map("sub_category")
+
+  amounts            Decimal         @db.Decimal(18, 2)
+  newInvestments     Decimal         @default(0) @db.Decimal(18, 2)
+  profitLoss         Decimal         @default(0) @db.Decimal(18, 2)
+  xirr               Decimal         @default(0) @db.Decimal(8, 4)
+
+  // Maker-Checker & State Management
+  voided             Boolean         @default(false)
+  voidReason         String?         @map("void_reason")
+  approvalStatus     ApprovalStatus  @default(PENDING) @map("approval_status")
+  returnReason       String?         @map("return_reason")
+
+  submittedById      String          @map("submitted_by_id")
+  submittedBy        User            @relation("CashflowSubmitter", fields: [submittedById], references: [id])
+  submittedByName    String          @map("submitted_by_name")
+  submittedAt        DateTime        @default(now()) @map("submitted_at")
+
+  approvedById       String?         @map("approved_by_id")
+  approvedBy         User?           @relation("CashflowApprover", fields: [approvedById], references: [id])
+  approvedByName     String?         @map("approved_by_name")
+  approvedAt         DateTime?       @map("approved_at")
+
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  auditEntries       AuditTrail[]    @relation("CashflowAudits")
+
+  @@index([month])
+  @@index([groupHeadId])
+  @@index([approvalStatus])
+  @@index([transactionDate])
+  @@map("master_cashflows")
+}

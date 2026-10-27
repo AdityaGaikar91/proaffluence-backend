@@ -14,6 +14,13 @@
     "emailVerified": true
   },
   {
+    "email": "manager1@proaffluence.com",
+    "name": "Priya S. (Manager)",
+    "password": "@Test123",
+    "role": "manager",
+    "emailVerified": true
+  },
+  {
     "email": "staff1@proaffluence.com",
     "name": "Staff Entry User One",
     "password": "@Test123",
