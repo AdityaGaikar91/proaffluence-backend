@@ -1,0 +1,30 @@
+// =============================================================================
+// DOMAIN: REPORTING RUNS & PRE-FLIGHT AUDIT SEALS
+// =============================================================================
+
+model ReportingRun {
+  id                   String       @id @default(uuid())
+  period               String       @unique // e.g. "30-09-2026"
+  monthKey             String       @map("month_key") // "2026-09"
+  isFrozen             Boolean      @default(false) @map("is_frozen")
+  frozenAt             DateTime?    @map("frozen_at")
+  frozenById           String?      @map("frozen_by_id")
+  frozenBy             User?        @relation("RunFreezer", fields: [frozenById], references: [id])
+  frozenByName         String?      @map("frozen_by_name")
+
+  unfrozenAt           DateTime?    @map("unfrozen_at")
+  unfrozenById         String?      @map("unfrozen_by_id")
+  unfrozenBy           User?        @relation("RunUnfreezer", fields: [unfrozenById], references: [id])
+  unfreezeReason       String?      @map("unfreeze_reason")
+
+  calculationStatus    String       @default("idle") @map("calculation_status") // idle | running | completed | failed
+  lastCalculatedAt     DateTime?    @map("last_calculated_at")
+  calculationSummary   Json?        @map("calculation_summary") // Detailed metrics snapshot
+
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+
+  auditEntries         AuditTrail[] @relation("RunAudits")
+
+  @@map("reporting_runs")
+}

@@ -8,6 +8,7 @@ import { MailModule } from './core/mail/mail.module';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { MeModule } from './me/me.module';
+import { CashflowsModule } from './cashflows/cashflows.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { MeModule } from './me/me.module';
     AuthModule,
     HealthModule,
     MeModule,
+    CashflowsModule,
   ],
 })
 export class AppModule {}

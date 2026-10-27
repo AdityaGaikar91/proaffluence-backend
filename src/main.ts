@@ -148,8 +148,18 @@ async function bootstrap() {
         persistAuthorization: true,
       },
     });
+    SwaggerModule.setup('swagger', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+      },
+    });
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+      },
+    });
 
-    logger.log(`Swagger UI active at: http://localhost:${port}/docs`);
+    logger.log(`Swagger UI active at: http://localhost:${port}/docs (also at /swagger and /api/docs)`);
     logger.log(`Better Auth Reference UI active at: http://localhost:${port}/api/auth/reference`);
   }
 

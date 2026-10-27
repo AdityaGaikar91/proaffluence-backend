@@ -1,0 +1,28 @@
+// =============================================================================
+// DOMAIN: CROSS-CUTTING ENTITY AUDIT TRAIL
+// =============================================================================
+
+model AuditTrail {
+  id             String          @id @default(uuid())
+  action         AuditAction
+  timestamp      DateTime        @default(now())
+  userId         String          @map("user_id")
+  user           User            @relation("AuditUser", fields: [userId], references: [id])
+  userName       String          @map("user_name")
+  reason         String?         @db.Text
+  changes        Json?           // Array of { field, from, to }
+
+  cashflowId     String?         @map("cashflow_id")
+  cashflow       MasterCashflow? @relation("CashflowAudits", fields: [cashflowId], references: [id], onDelete: Cascade)
+
+  balanceId      String?         @map("balance_id")
+  balance        ClosingBalance? @relation("BalanceAudits", fields: [balanceId], references: [id], onDelete: Cascade)
+
+  reportingRunId String?         @map("reporting_run_id")
+  reportingRun   ReportingRun?   @relation("RunAudits", fields: [reportingRunId], references: [id], onDelete: Cascade)
+
+  @@index([cashflowId])
+  @@index([balanceId])
+  @@index([reportingRunId])
+  @@map("audit_trails")
+}
