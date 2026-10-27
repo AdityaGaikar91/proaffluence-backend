@@ -57,9 +57,11 @@ async function bootstrap() {
   const authHandler = toNodeHandler(auth);
 
   // Mount Better Auth handler BEFORE body parser middleware,
-  // while allowing custom NestJS password reset routes to pass through to NestJS
+  // while allowing custom NestJS auth & password reset routes to pass through to NestJS
   app.use('/api/auth', (req, res, next) => {
     if (
+      req.path === '/me' ||
+      req.path.startsWith('/me?') ||
       req.path === '/forgot-password' ||
       req.path === '/reset-password' ||
       req.path.startsWith('/forgot-password?') ||

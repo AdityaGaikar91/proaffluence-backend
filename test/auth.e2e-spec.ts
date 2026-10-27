@@ -32,9 +32,11 @@ describe('Auth & Session Management (e2e)', () => {
 
     app.use(cookieParser());
     const authHandler = toNodeHandler(auth);
-    // Mount Better Auth handler while letting custom NestJS password reset routes pass through
+    // Mount Better Auth handler while letting custom NestJS auth & password reset routes pass through
     app.use('/api/auth', (req, res, next) => {
       if (
+        req.path === '/me' ||
+        req.path.startsWith('/me?') ||
         req.path === '/forgot-password' ||
         req.path === '/reset-password' ||
         req.path.startsWith('/forgot-password?') ||
@@ -138,16 +140,16 @@ describe('Auth & Session Management (e2e)', () => {
     });
   });
 
-  describe('GET /me (Session verification & Profile)', () => {
+  describe('GET /api/auth/me (Session verification & Profile)', () => {
     it('should reject requests without a session cookie with 401', async () => {
       await request(app.getHttpServer())
-        .get('/me')
+        .get('/api/auth/me')
         .expect(401);
     });
 
     it('should return authenticated user details and role with valid session cookie', async () => {
       const response = await request(app.getHttpServer())
-        .get('/me')
+        .get('/api/auth/me')
         .set('Cookie', adminCookie)
         .expect(200);
 
@@ -174,9 +176,9 @@ describe('Auth & Session Management (e2e)', () => {
         expect(cookieStr).toContain('proaffluence.session_token');
       }
 
-      // GET /me with the invalidated cookie should now return 401
+      // GET /api/auth/me with the invalidated cookie should now return 401
       await request(app.getHttpServer())
-        .get('/me')
+        .get('/api/auth/me')
         .set('Cookie', adminCookie)
         .expect(401);
     });

@@ -13,7 +13,7 @@ export class MeResponseDto {
   @ApiProperty({
     description: 'Internal user role',
     example: 'super_admin',
-    enum: ['super_admin', 'staff_entry'],
+    enum: ['super_admin', 'manager', 'staff_entry'],
   })
   role: string;
 }

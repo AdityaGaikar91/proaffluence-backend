@@ -5,17 +5,18 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentUser } from './decorators/current-user.decorator';
 import { MeResponseDto } from './dto/me-response.dto';
 
-@ApiTags('Me')
+@ApiTags('Auth')
 @ApiCookieAuth('proaffluence.session_token')
-@Controller('me')
+@Controller('api/auth')
 export class MeController {
-  @Get()
+  @Get('me')
   @ApiOperation({
     summary: 'Get current user profile',
-    description: 'Returns profile details and internal role for the authenticated session user',
+    description:
+      'Returns profile details and internal role for the authenticated session user',
   })
   @ApiResponse({
     status: 200,
