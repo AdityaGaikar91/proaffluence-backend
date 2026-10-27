@@ -1,0 +1,66 @@
+[
+  {
+    "code": "NIFTY_50_TRI",
+    "name": "Nifty 50 Total Returns Index",
+    "shortName": "Nifty 50 TRI",
+    "returnType": "TRI",
+    "exchange": "NSE",
+    "provider": "NSE Indices Free Live Feed",
+    "description": "Includes capital price appreciation plus all dividend yields reinvested.",
+    "methodologyLabel": "TRI (Total Return — Div. Reinvested)",
+    "isDefault": true,
+    "initialQuotes": [
+      { "date": "31-03-2022", "closingValue": 25110.45, "notes": "FY 2021-22 Closing" },
+      { "date": "31-03-2023", "closingValue": 24980.20, "notes": "FY 2022-23 Closing" },
+      { "date": "31-03-2024", "closingValue": 31970.65, "notes": "FY 2023-24 Closing" },
+      { "date": "31-03-2025", "closingValue": 35680.10, "notes": "FY 2024-25 Closing" },
+      { "date": "31-03-2026", "closingValue": 39150.80, "notes": "FY 2025-26 Closing" },
+      { "date": "30-09-2026", "closingValue": 41250.35, "notes": "HY1 2026-27 Closing" }
+    ]
+  },
+  {
+    "code": "NIFTY_50_PR",
+    "name": "Nifty 50 Price Return Index",
+    "shortName": "Nifty 50 PR",
+    "returnType": "PR",
+    "exchange": "NSE",
+    "provider": "NSE Free Spot Feed",
+    "description": "Capital gains price return only. Explicit fallback when TRI feed is unavailable.",
+    "methodologyLabel": "PR (Price Return Fallback)",
+    "isDefault": false,
+    "initialQuotes": [
+      { "date": "31-03-2026", "closingValue": 24850.50, "notes": "FY 2025-26 Spot Closing" },
+      { "date": "30-09-2026", "closingValue": 26180.90, "notes": "HY1 2026-27 Spot Closing" }
+    ]
+  },
+  {
+    "code": "BSE_500",
+    "name": "S&P BSE 500 Index",
+    "shortName": "BSE 500",
+    "returnType": "TRI",
+    "exchange": "BSE",
+    "provider": "BSE Direct Feed API",
+    "description": "Broad market benchmark covering over 93% of total market capitalization.",
+    "methodologyLabel": "Broad Market (93% Market Cap)",
+    "isDefault": false,
+    "initialQuotes": [
+      { "date": "31-03-2026", "closingValue": 36420.15, "notes": "FY 2025-26 Closing" },
+      { "date": "30-09-2026", "closingValue": 38900.50, "notes": "HY1 2026-27 Closing" }
+    ]
+  },
+  {
+    "code": "SENSEX",
+    "name": "S&P BSE Sensex Index",
+    "shortName": "Sensex",
+    "returnType": "TRI",
+    "exchange": "BSE",
+    "provider": "BSE Free Public Feed",
+    "description": "Flagship index representing 30 financially sound and market-leading Indian companies.",
+    "methodologyLabel": "Large-Cap 30 Benchmark",
+    "isDefault": false,
+    "initialQuotes": [
+      { "date": "31-03-2026", "closingValue": 81200.75, "notes": "FY 2025-26 Closing" },
+      { "date": "30-09-2026", "closingValue": 85400.20, "notes": "HY1 2026-27 Closing" }
+    ]
+  }
+]

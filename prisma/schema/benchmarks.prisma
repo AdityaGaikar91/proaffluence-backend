@@ -1,0 +1,35 @@
+// =============================================================================
+// DOMAIN: MARKET BENCHMARKS & INDICES DATA RECORDS
+// =============================================================================
+
+model Benchmark {
+  code              BenchmarkCode       @id
+  name              String
+  shortName         String              @map("short_name")
+  returnType        BenchmarkReturnType @map("return_type")
+  exchange          String              // "NSE" | "BSE"
+  provider          String
+  description       String
+  isDefault         Boolean             @default(false) @map("is_default")
+  methodologyLabel  String              @map("methodology_label")
+
+  records           IndicesDataRecord[]
+
+  @@map("benchmarks")
+}
+
+model IndicesDataRecord {
+  id           String        @id @default(uuid())
+  date         String                             // "dd-MM-yyyy" or "YYYY-MM-DD"
+  indexCode    BenchmarkCode @map("index_code")
+  benchmark    Benchmark     @relation(fields: [indexCode], references: [code], onDelete: Restrict)
+  closingValue Decimal       @map("closing_value") @db.Decimal(14, 4)
+  source       QuoteSource   @default(FEED)
+  updatedBy    String        @map("updated_by")
+  notes        String?       @db.Text
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  @@unique([date, indexCode])
+  @@index([date])
+  @@map("indices_data_records")
+}

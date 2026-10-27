@@ -1,0 +1,17 @@
+// =============================================================================
+// DOMAIN: HYBRID ASSET ALLOCATION OVERRIDES
+// =============================================================================
+
+model HybridAllocationRule {
+  id          String        @id @default(uuid())
+  schemeName  String        @unique @map("scheme_name")
+  category    AssetCategory @default(MF)
+  equityRatio Int           @default(50) @map("equity_ratio") // 0 to 100
+  debtRatio   Int           @default(50) @map("debt_ratio")   // 100 - equityRatio
+  isCustom    Boolean       @default(false) @map("is_custom")
+  notes       String?       @db.Text
+  updatedBy   String        @map("updated_by")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  @@map("hybrid_allocation_rules")
+}

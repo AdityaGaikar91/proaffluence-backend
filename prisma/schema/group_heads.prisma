@@ -1,0 +1,46 @@
+// =============================================================================
+// DOMAIN: GROUP HEADS & FAMILY REGISTRY
+// =============================================================================
+
+model GroupHead {
+  id              String          @id @default(uuid())
+  customId        String          @unique @map("custom_id") // e.g. "GH-0101"
+  name            String                                    // e.g. "ABC Family Office"
+  contactPerson   String?         @map("contact_person")
+  email           String                                    // Primary dispatch email
+  secondaryEmail  String?         @map("secondary_email")
+  inceptionDate   String          @map("inception_date")   // "dd-MM-yyyy"
+  pan             String                                    // Client PAN (PDF password)
+  status          String          @default("Active")        // "Active" | "Inactive"
+  notes           String?         @db.Text
+  categories      AssetCategory[]
+  totalAum        Decimal         @default(0) @db.Decimal(18, 2)
+  netInvestment   Decimal         @default(0) @db.Decimal(18, 2)
+
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  familyMembers   FamilyMember[]
+  cashflows       MasterCashflow[]
+  closingBalances ClosingBalance[]
+  emailCampaigns  EmailCampaign[]
+
+  @@map("group_heads")
+}
+
+model FamilyMember {
+  id              String          @id @default(uuid())
+  groupHeadId     String          @map("group_head_id")
+  groupHead       GroupHead       @relation(fields: [groupHeadId], references: [id], onDelete: Cascade)
+  name            String                                    // e.g. "Rajesh ABC"
+  relationship    String?                                   // e.g. "Karta", "Self", "Spouse", "Trust"
+  pan             String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  cashflows       MasterCashflow[]
+  closingBalances ClosingBalance[]
+
+  @@unique([groupHeadId, name])
+  @@map("family_members")
+}

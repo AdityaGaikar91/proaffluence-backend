@@ -1,0 +1,42 @@
+[
+  {
+    "id": "hyb-001",
+    "schemeName": "ICICI Prudential Balanced Advantage Fund",
+    "category": "MF",
+    "equityRatio": 65,
+    "debtRatio": 35,
+    "isCustom": true,
+    "notes": "Dynamic asset allocation based on in-house P/B and P/E valuation model.",
+    "updatedBy": "Priya S. (Manager)"
+  },
+  {
+    "id": "hyb-002",
+    "schemeName": "HDFC Balanced Advantage Fund",
+    "category": "MF",
+    "equityRatio": 60,
+    "debtRatio": 40,
+    "isCustom": true,
+    "notes": "ProAffluence approved model portfolio allocation for moderate risk mandate.",
+    "updatedBy": "Priya S. (Manager)"
+  },
+  {
+    "id": "hyb-003",
+    "schemeName": "Kotak Equity Hybrid Fund",
+    "category": "MF",
+    "equityRatio": 70,
+    "debtRatio": 30,
+    "isCustom": true,
+    "notes": "Aggressive hybrid mandate for long term capital growth.",
+    "updatedBy": "Priya S. (Manager)"
+  },
+  {
+    "id": "hyb-004",
+    "schemeName": "Edelweiss Balanced Advantage Fund",
+    "category": "MF",
+    "equityRatio": 55,
+    "debtRatio": 45,
+    "isCustom": true,
+    "notes": "Conservative dynamic allocation fund overlay.",
+    "updatedBy": "Priya S. (Manager)"
+  }
+]
