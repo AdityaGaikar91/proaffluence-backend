@@ -1,17 +1,10 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEnum,
-  IsIn,
-  IsInt,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-} from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import { IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { AssetCategory } from '@prisma/client';
+import { PaginationQueryDto } from '../../core/pagination';
 
-export class QueryGroupHeadDto {
+export class QueryGroupHeadDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     description:
       'Search across Name, Custom ID, Contact Person, Email, and PAN',
@@ -42,33 +35,4 @@ export class QueryGroupHeadDto {
   @IsOptional()
   @IsIn(['Active', 'Inactive', 'All'])
   status?: 'Active' | 'Inactive' | 'All';
-
-  @ApiPropertyOptional({ description: 'Page number', default: 1 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @ApiPropertyOptional({ description: 'Items per page', default: 50 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number = 50;
-
-  @ApiPropertyOptional({ description: 'Sort by field', default: 'name' })
-  @IsOptional()
-  @IsString()
-  sortBy?: string = 'name';
-
-  @ApiPropertyOptional({
-    description: 'Sort order',
-    enum: ['asc', 'desc'],
-    default: 'asc',
-  })
-  @IsOptional()
-  @IsIn(['asc', 'desc'])
-  sortOrder?: 'asc' | 'desc' = 'asc';
 }

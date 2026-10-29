@@ -188,16 +188,43 @@ async function seedGroupHeads() {
       });
       groupHeadId = created.id;
       console.log(`[Seed] Created Group Head: ${data.name} (${data.customId})`);
+    } else {
+      await prisma.groupHead.update({
+        where: { id: existing.id },
+        data: {
+          name: data.name,
+          contactPerson: data.contactPerson,
+          email: data.email,
+          secondaryEmail: data.secondaryEmail,
+          inceptionDate: data.inceptionDate,
+          pan: data.pan,
+          status: data.status,
+          notes: data.notes,
+          categories: data.categories,
+          totalAum: data.totalAum,
+          netInvestment: data.netInvestment,
+        },
+      });
+      console.log(`[Seed] Updated Group Head: ${data.name} (${data.customId})`);
     }
 
     if (groupHeadId && Array.isArray(familyMembers)) {
-      for (const name of familyMembers) {
+      for (const memberItem of familyMembers) {
+        const name = typeof memberItem === 'string' ? memberItem : memberItem.name;
+        const relationship = typeof memberItem === 'object' ? memberItem.relationship : undefined;
+        const pan = typeof memberItem === 'object' ? memberItem.pan : undefined;
+
         const mem = await prisma.familyMember.findUnique({
           where: { groupHeadId_name: { groupHeadId, name } },
         });
         if (!mem) {
           await prisma.familyMember.create({
-            data: { groupHeadId, name },
+            data: { groupHeadId, name, relationship, pan },
+          });
+        } else if (relationship || pan) {
+          await prisma.familyMember.update({
+            where: { id: mem.id },
+            data: { relationship, pan },
           });
         }
       }

@@ -21,6 +21,7 @@
     "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
     "seed:users": "ts-node -r tsconfig-paths/register prisma/seed.ts",
     "seed:admins": "ts-node -r tsconfig-paths/register prisma/seed.ts",
+    "seed:group-heads": "ts-node -r tsconfig-paths/register prisma/seeds/seed-group-heads.ts",
     "db:seed": "prisma db seed",
     "migrate": "prisma migrate dev",
     "migrate:dev": "prisma migrate dev",

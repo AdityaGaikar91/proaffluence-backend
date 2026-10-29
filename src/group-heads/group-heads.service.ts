@@ -10,6 +10,10 @@ import { UpdateGroupHeadDto } from './dto/update-group-head.dto';
 import { CreateFamilyMemberDto } from './dto/create-family-member.dto';
 import { QueryGroupHeadDto } from './dto/query-group-head.dto';
 import { AssetCategory, AuditAction, Prisma } from '@prisma/client';
+import {
+  parsePaginationParams,
+  createPaginationMeta,
+} from '../core/pagination';
 
 @Injectable()
 export class GroupHeadsService {
@@ -19,9 +23,8 @@ export class GroupHeadsService {
    * List all group heads with search, status/category filters, summary metrics, and pagination.
    */
   async findAll(query: QueryGroupHeadDto) {
-    const page = query.page && query.page > 0 ? query.page : 1;
-    const limit = query.limit && query.limit > 0 ? query.limit : 50;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip, take, sortBy, sortOrder } =
+      parsePaginationParams(query, 'name');
 
     const where: Prisma.GroupHeadWhereInput = {};
 
@@ -58,10 +61,9 @@ export class GroupHeadsService {
       'totalAum',
       'netInvestment',
     ];
-    const sortField = validSortFields.includes(query.sortBy || '')
-      ? (query.sortBy as string)
+    const sortField = validSortFields.includes(sortBy || '')
+      ? (sortBy as string)
       : 'name';
-    const sortOrder = query.sortOrder === 'desc' ? 'desc' : 'asc';
 
     // Execute paginated queries and summary aggregations concurrently
     const [total, activeCount, inactiveCount, aggregateAum, records] =
@@ -85,9 +87,9 @@ export class GroupHeadsService {
               orderBy: { name: 'asc' },
             },
           },
-          orderBy: { [sortField]: sortOrder },
+          orderBy: [{ [sortField]: sortOrder }, { id: 'asc' }],
           skip,
-          take: limit,
+          take,
         }),
       ]);
 
@@ -118,13 +120,12 @@ export class GroupHeadsService {
       updatedAt: head.updatedAt,
     }));
 
+    const paginationMeta = createPaginationMeta(total, page, limit);
+
     return {
       data: formattedData,
       meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit) || 1,
+        ...paginationMeta,
         activeCount,
         inactiveCount,
         totalAum: Number(aggregateAum._sum.totalAum || 0),

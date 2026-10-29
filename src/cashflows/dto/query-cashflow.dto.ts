@@ -1,8 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsIn, IsOptional, IsString } from 'class-validator';
+import { PaginationQueryDto } from '../../core/pagination';
 
-export class QueryCashflowDto {
+export class QueryCashflowDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: ['ALL', 'PENDING', 'APPROVED', 'RETURNED'],
     default: 'ALL',
@@ -30,18 +30,4 @@ export class QueryCashflowDto {
   @IsOptional()
   @IsString()
   groupHeadName?: string;
-
-  @ApiPropertyOptional({ default: 1, minimum: 1 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @ApiPropertyOptional({ default: 50, minimum: 1 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  limit?: number = 50;
 }

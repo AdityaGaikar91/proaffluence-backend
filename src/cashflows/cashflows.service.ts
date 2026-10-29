@@ -10,6 +10,10 @@ import { VoidCashflowDto } from './dto/void-cashflow.dto';
 import { ReturnCashflowDto } from './dto/return-cashflow.dto';
 import { QueryCashflowDto } from './dto/query-cashflow.dto';
 import { ApprovalStatus, AuditAction, Prisma } from '@prisma/client';
+import {
+  parsePaginationParams,
+  createPaginationMeta,
+} from '../core/pagination';
 
 const MONTH_NAMES = [
   'January',
@@ -149,15 +153,8 @@ export class CashflowsService {
    * Query all cashflows with status tabs, search, and pagination.
    */
   async findAll(query: QueryCashflowDto) {
-    const {
-      statusTab = 'ALL',
-      search,
-      month,
-      groupHeadName,
-      page = 1,
-      limit = 50,
-    } = query;
-    const skip = (page - 1) * limit;
+    const { statusTab = 'ALL', search, month, groupHeadName } = query;
+    const { page, limit, skip, take } = parsePaginationParams(query, 'srNo');
 
     // 1. Calculate status counts
     const [allCount, pendingCount, approvedCount, returnedCount] =
@@ -214,11 +211,13 @@ export class CashflowsService {
       this.prisma.masterCashflow.count({ where }),
       this.prisma.masterCashflow.findMany({
         where,
-        orderBy: { srNo: 'desc' },
+        orderBy: [{ srNo: 'desc' }, { id: 'asc' }],
         skip,
-        take: limit,
+        take,
       }),
     ]);
+
+    const meta = createPaginationMeta(total, page, limit);
 
     return {
       data: items,
@@ -228,12 +227,8 @@ export class CashflowsService {
         approved: approvedCount,
         returned: returnedCount,
       },
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
+      meta,
+      pagination: meta, // Backward compatibility alias
     };
   }
 

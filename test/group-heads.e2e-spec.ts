@@ -161,6 +161,25 @@ describe('Group-Head Masters (e2e)', () => {
       expect(response.body.meta).toHaveProperty('totalAum');
     });
 
+    it('should default to page 1 and limit 10 with boolean navigation flags', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/group-heads')
+        .set('Cookie', staffCookie)
+        .expect(200);
+
+      expect(response.body.meta.page).toBe(1);
+      expect(response.body.meta.limit).toBe(10);
+      expect(typeof response.body.meta.hasNextPage).toBe('boolean');
+      expect(typeof response.body.meta.hasPreviousPage).toBe('boolean');
+    });
+
+    it('should reject pagination limit greater than 100 with 400', async () => {
+      await request(app.getHttpServer())
+        .get('/api/v1/group-heads?limit=101')
+        .set('Cookie', staffCookie)
+        .expect(400);
+    });
+
     it('should search group heads by name or custom ID', async () => {
       const response = await request(app.getHttpServer())
         .get('/api/v1/group-heads?search=ABC')
