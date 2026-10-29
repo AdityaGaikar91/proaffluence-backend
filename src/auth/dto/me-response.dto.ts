@@ -1,13 +1,22 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 export class MeResponseDto {
-  @ApiProperty({ description: 'User unique identifier', example: 'cm3abc1230000xyz' })
+  @ApiProperty({
+    description: 'User unique identifier',
+    example: 'cm3abc1230000xyz',
+  })
   id: string;
 
-  @ApiProperty({ description: 'User corporate email address', example: 'admin@proaffluence.com' })
+  @ApiProperty({
+    description: 'User corporate email address',
+    example: 'admin@proaffluence.com',
+  })
   email: string;
 
-  @ApiProperty({ description: 'User full display name', example: 'Super Admin One' })
+  @ApiProperty({
+    description: 'User full display name',
+    example: 'Super Admin One',
+  })
   name: string;
 
   @ApiProperty({

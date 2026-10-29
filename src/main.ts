@@ -25,7 +25,8 @@ async function bootstrap() {
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
   const trustProxy = configService.get<boolean>('TRUST_PROXY', false);
   const swaggerEnabled = configService.get<boolean>('SWAGGER_ENABLED', true);
-  const frontendOrigins = (configService.get<string>('FRONTEND_ORIGINS', 'http://localhost:3000'))
+  const frontendOrigins = configService
+    .get<string>('FRONTEND_ORIGINS', 'http://localhost:3000')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -125,7 +126,9 @@ async function bootstrap() {
             if (path === '/get-session' && (methods as any)?.post) {
               delete (methods as any).post;
             }
-            for (const operation of Object.values(methods as Record<string, any>)) {
+            for (const operation of Object.values(
+              methods as Record<string, any>,
+            )) {
               if (operation && typeof operation === 'object') {
                 operation.tags = ['Auth'];
               }
@@ -141,7 +144,9 @@ async function bootstrap() {
           };
         }
       } catch (err: any) {
-        logger.warn(`Could not merge Better Auth schema into Swagger: ${err.message}`);
+        logger.warn(
+          `Could not merge Better Auth schema into Swagger: ${err.message}`,
+        );
       }
     }
 
@@ -161,8 +166,12 @@ async function bootstrap() {
       },
     });
 
-    logger.log(`Swagger UI active at: http://localhost:${port}/docs (also at /swagger and /api/docs)`);
-    logger.log(`Better Auth Reference UI active at: http://localhost:${port}/api/auth/reference`);
+    logger.log(
+      `Swagger UI active at: http://localhost:${port}/docs (also at /swagger and /api/docs)`,
+    );
+    logger.log(
+      `Better Auth Reference UI active at: http://localhost:${port}/api/auth/reference`,
+    );
   }
 
   await app.listen(port);

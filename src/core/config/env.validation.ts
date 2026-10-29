@@ -36,7 +36,9 @@ export class EnvironmentVariables {
   DATABASE_URL: string;
 
   @IsString()
-  @MinLength(32, { message: 'BETTER_AUTH_SECRET must be at least 32 characters long' })
+  @MinLength(32, {
+    message: 'BETTER_AUTH_SECRET must be at least 32 characters long',
+  })
   BETTER_AUTH_SECRET: string;
 
   @IsString()

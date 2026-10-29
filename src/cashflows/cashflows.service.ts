@@ -45,13 +45,18 @@ export class CashflowsService {
   /**
    * Record a new trade entry (Add Trade Entry Modal).
    */
-  async create(dto: CreateCashflowDto, currentUser: { id: string; name?: string; role?: string }) {
+  async create(
+    dto: CreateCashflowDto,
+    currentUser: { id: string; name?: string; role?: string },
+  ) {
     const actorName = currentUser.name || 'Staff User';
 
     return this.prisma.$transaction(async (tx) => {
       // 1. Resolve Group Head
       const groupHead = await tx.groupHead.findFirst({
-        where: { name: { equals: dto.Group_Head_Name.trim(), mode: 'insensitive' } },
+        where: {
+          name: { equals: dto.Group_Head_Name.trim(), mode: 'insensitive' },
+        },
         include: { familyMembers: true },
       });
 
@@ -63,7 +68,8 @@ export class CashflowsService {
 
       // 2. Resolve or automatically create Family Member if not present
       let familyMember = groupHead.familyMembers.find(
-        (m) => m.name.toLowerCase() === dto.Family_Member_Name.trim().toLowerCase(),
+        (m) =>
+          m.name.toLowerCase() === dto.Family_Member_Name.trim().toLowerCase(),
       );
 
       if (!familyMember && dto.Family_Member_Name.trim()) {
@@ -86,7 +92,8 @@ export class CashflowsService {
       }
 
       // 4. Resolve Month label
-      const monthLabel = dto.Month?.trim() || deriveMonthFromDate(dto.Transaction_Date);
+      const monthLabel =
+        dto.Month?.trim() || deriveMonthFromDate(dto.Transaction_Date);
 
       // 5. Create MasterCashflow entry
       const cashflow = await tx.masterCashflow.create({
@@ -142,22 +149,30 @@ export class CashflowsService {
    * Query all cashflows with status tabs, search, and pagination.
    */
   async findAll(query: QueryCashflowDto) {
-    const { statusTab = 'ALL', search, month, groupHeadName, page = 1, limit = 50 } = query;
+    const {
+      statusTab = 'ALL',
+      search,
+      month,
+      groupHeadName,
+      page = 1,
+      limit = 50,
+    } = query;
     const skip = (page - 1) * limit;
 
     // 1. Calculate status counts
-    const [allCount, pendingCount, approvedCount, returnedCount] = await Promise.all([
-      this.prisma.masterCashflow.count({ where: { voided: false } }),
-      this.prisma.masterCashflow.count({
-        where: { voided: false, approvalStatus: ApprovalStatus.PENDING },
-      }),
-      this.prisma.masterCashflow.count({
-        where: { voided: false, approvalStatus: ApprovalStatus.APPROVED },
-      }),
-      this.prisma.masterCashflow.count({
-        where: { voided: false, approvalStatus: ApprovalStatus.RETURNED },
-      }),
-    ]);
+    const [allCount, pendingCount, approvedCount, returnedCount] =
+      await Promise.all([
+        this.prisma.masterCashflow.count({ where: { voided: false } }),
+        this.prisma.masterCashflow.count({
+          where: { voided: false, approvalStatus: ApprovalStatus.PENDING },
+        }),
+        this.prisma.masterCashflow.count({
+          where: { voided: false, approvalStatus: ApprovalStatus.APPROVED },
+        }),
+        this.prisma.masterCashflow.count({
+          where: { voided: false, approvalStatus: ApprovalStatus.RETURNED },
+        }),
+      ]);
 
     // 2. Build where filter
     const where: Prisma.MasterCashflowWhereInput = {};
@@ -260,23 +275,47 @@ export class CashflowsService {
     return this.prisma.$transaction(async (tx) => {
       // Prepare diffs
       const diffs: Record<string, { from: any; to: any }> = {};
-      if (dto.Amounts !== undefined && Number(existing.amounts) !== dto.Amounts) {
+      if (
+        dto.Amounts !== undefined &&
+        Number(existing.amounts) !== dto.Amounts
+      ) {
         diffs.Amounts = { from: Number(existing.amounts), to: dto.Amounts };
       }
-      if (dto.New_Investments !== undefined && Number(existing.newInvestments) !== dto.New_Investments) {
-        diffs.New_Investments = { from: Number(existing.newInvestments), to: dto.New_Investments };
+      if (
+        dto.New_Investments !== undefined &&
+        Number(existing.newInvestments) !== dto.New_Investments
+      ) {
+        diffs.New_Investments = {
+          from: Number(existing.newInvestments),
+          to: dto.New_Investments,
+        };
       }
-      if (dto.Profit_Loss !== undefined && Number(existing.profitLoss) !== dto.Profit_Loss) {
-        diffs.Profit_Loss = { from: Number(existing.profitLoss), to: dto.Profit_Loss };
+      if (
+        dto.Profit_Loss !== undefined &&
+        Number(existing.profitLoss) !== dto.Profit_Loss
+      ) {
+        diffs.Profit_Loss = {
+          from: Number(existing.profitLoss),
+          to: dto.Profit_Loss,
+        };
       }
       if (dto.XIRR !== undefined && Number(existing.xirr) !== dto.XIRR) {
         diffs.XIRR = { from: Number(existing.xirr), to: dto.XIRR };
       }
-      if (dto.Transaction_Type && existing.transactionType !== dto.Transaction_Type) {
-        diffs.Transaction_Type = { from: existing.transactionType, to: dto.Transaction_Type };
+      if (
+        dto.Transaction_Type &&
+        existing.transactionType !== dto.Transaction_Type
+      ) {
+        diffs.Transaction_Type = {
+          from: existing.transactionType,
+          to: dto.Transaction_Type,
+        };
       }
       if (dto.Sub_Category && existing.subCategory !== dto.Sub_Category) {
-        diffs.Sub_Category = { from: existing.subCategory, to: dto.Sub_Category };
+        diffs.Sub_Category = {
+          from: existing.subCategory,
+          to: dto.Sub_Category,
+        };
       }
 
       // Update entry and set status back to PENDING for manager review
@@ -284,8 +323,14 @@ export class CashflowsService {
         where: { id },
         data: {
           amounts: dto.Amounts !== undefined ? dto.Amounts : existing.amounts,
-          newInvestments: dto.New_Investments !== undefined ? dto.New_Investments : existing.newInvestments,
-          profitLoss: dto.Profit_Loss !== undefined ? dto.Profit_Loss : existing.profitLoss,
+          newInvestments:
+            dto.New_Investments !== undefined
+              ? dto.New_Investments
+              : existing.newInvestments,
+          profitLoss:
+            dto.Profit_Loss !== undefined
+              ? dto.Profit_Loss
+              : existing.profitLoss,
           xirr: dto.XIRR !== undefined ? dto.XIRR : existing.xirr,
           transactionType: dto.Transaction_Type || existing.transactionType,
           category: dto.Category || existing.category,
@@ -317,7 +362,11 @@ export class CashflowsService {
   /**
    * Void entry (marks voided: true with mandatory reason).
    */
-  async void(id: string, dto: VoidCashflowDto, currentUser: { id: string; name?: string }) {
+  async void(
+    id: string,
+    dto: VoidCashflowDto,
+    currentUser: { id: string; name?: string },
+  ) {
     const existing = await this.findOne(id);
     if (existing.voided) {
       throw new BadRequestException('Entry is already voided.');
@@ -464,7 +513,11 @@ export class CashflowsService {
   /**
    * Manager Bulk Return multiple entries.
    */
-  async bulkReturn(ids: string[], reason: string, currentUser: { id: string; name?: string }) {
+  async bulkReturn(
+    ids: string[],
+    reason: string,
+    currentUser: { id: string; name?: string },
+  ) {
     const actorName = currentUser.name || 'Manager';
 
     return this.prisma.$transaction(async (tx) => {

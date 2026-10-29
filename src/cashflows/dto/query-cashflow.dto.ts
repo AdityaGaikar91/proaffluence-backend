@@ -3,17 +3,25 @@ import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryCashflowDto {
-  @ApiPropertyOptional({ enum: ['ALL', 'PENDING', 'APPROVED', 'RETURNED'], default: 'ALL' })
+  @ApiPropertyOptional({
+    enum: ['ALL', 'PENDING', 'APPROVED', 'RETURNED'],
+    default: 'ALL',
+  })
   @IsOptional()
   @IsIn(['ALL', 'PENDING', 'APPROVED', 'RETURNED'])
   statusTab?: 'ALL' | 'PENDING' | 'APPROVED' | 'RETURNED' = 'ALL';
 
-  @ApiPropertyOptional({ description: 'Search across Sr_No, Group Head, Client Owner, Sub Category, etc.' })
+  @ApiPropertyOptional({
+    description:
+      'Search across Sr_No, Group Head, Client Owner, Sub Category, etc.',
+  })
   @IsOptional()
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({ description: 'Filter by specific reporting month (e.g. October 2026)' })
+  @ApiPropertyOptional({
+    description: 'Filter by specific reporting month (e.g. October 2026)',
+  })
   @IsOptional()
   @IsString()
   month?: string;

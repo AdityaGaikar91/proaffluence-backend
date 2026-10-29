@@ -19,7 +19,8 @@ describe('Auth & Session Management (e2e)', () => {
   const seedUsers = JSON.parse(
     fs.readFileSync(path.join(__dirname, '../prisma/seeds/users.json'), 'utf8'),
   );
-  const validAdmin = seedUsers.find((u: any) => u.role === 'super_admin') || seedUsers[0];
+  const validAdmin =
+    seedUsers.find((u: any) => u.role === 'super_admin') || seedUsers[0];
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -129,12 +130,16 @@ describe('Auth & Session Management (e2e)', () => {
       // Verify Set-Cookie header
       const setCookie = response.headers['set-cookie'];
       expect(setCookie).toBeDefined();
-      const cookieStr = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie;
+      const cookieStr = Array.isArray(setCookie)
+        ? setCookie.join('; ')
+        : setCookie;
       expect(cookieStr).toContain('proaffluence.session_token');
       expect(cookieStr.toLowerCase()).toContain('httponly');
 
       // Save cookie for subsequent authenticated tests
-      const sessionCookieMatch = cookieStr.match(/proaffluence\.session_token=[^;]+/);
+      const sessionCookieMatch = cookieStr.match(
+        /proaffluence\.session_token=[^;]+/,
+      );
       expect(sessionCookieMatch).not.toBeNull();
       adminCookie = sessionCookieMatch![0];
     });
@@ -142,9 +147,7 @@ describe('Auth & Session Management (e2e)', () => {
 
   describe('GET /api/auth/me (Session verification & Profile)', () => {
     it('should reject requests without a session cookie with 401', async () => {
-      await request(app.getHttpServer())
-        .get('/api/auth/me')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/auth/me').expect(401);
     });
 
     it('should return authenticated user details and role with valid session cookie', async () => {
@@ -172,7 +175,9 @@ describe('Auth & Session Management (e2e)', () => {
       // Cookie should be cleared or expired
       const setCookie = signoutResponse.headers['set-cookie'];
       if (setCookie) {
-        const cookieStr = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie;
+        const cookieStr = Array.isArray(setCookie)
+          ? setCookie.join('; ')
+          : setCookie;
         expect(cookieStr).toContain('proaffluence.session_token');
       }
 
@@ -186,7 +191,10 @@ describe('Auth & Session Management (e2e)', () => {
 
   describe('Rate Limiting on Sign-in', () => {
     it('should trigger rate limit (429) after configured attempt threshold', async () => {
-      const maxAttempts = parseInt(process.env.SIGNIN_RATE_LIMIT_MAX || '5', 10);
+      const maxAttempts = parseInt(
+        process.env.SIGNIN_RATE_LIMIT_MAX || '5',
+        10,
+      );
       let hitRateLimit = false;
 
       // Send rapid requests beyond maxAttempts
@@ -210,7 +218,8 @@ describe('Auth & Session Management (e2e)', () => {
   });
 
   describe('Password Reset Flow', () => {
-    const testUser = seedUsers.find((u: any) => u.role === 'staff_entry') || seedUsers[1];
+    const testUser =
+      seedUsers.find((u: any) => u.role === 'staff_entry') || seedUsers[1];
     let resetToken: string;
 
     it('should reject forgot-password with malformed email (class-validator)', async () => {
@@ -280,7 +289,9 @@ describe('Auth & Session Management (e2e)', () => {
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.message).toContain('Invalid or expired password reset token');
+      expect(res.body.message).toContain(
+        'Invalid or expired password reset token',
+      );
     });
 
     it('should successfully reset password with valid token, consume token, and allow sign-in', async () => {
@@ -333,7 +344,9 @@ describe('Auth & Session Management (e2e)', () => {
       // Restore original password to keep test environment idempotent
       const ctx = await auth.$context;
       const originalHash = await ctx.password.hash(testUser.password);
-      const dbUser = await prisma.user.findUnique({ where: { email: testUser.email } });
+      const dbUser = await prisma.user.findUnique({
+        where: { email: testUser.email },
+      });
       await prisma.account.updateMany({
         where: { userId: dbUser!.id, providerId: 'credential' },
         data: { password: originalHash },

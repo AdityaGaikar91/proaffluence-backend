@@ -43,7 +43,9 @@ export class MailService {
     }
   }
 
-  async sendMail(options: SendMailOptions): Promise<{ sent: boolean; method: 'smtp' | 'console' }> {
+  async sendMail(
+    options: SendMailOptions,
+  ): Promise<{ sent: boolean; method: 'smtp' | 'console' }> {
     const { to, subject, text, html } = options;
 
     if (this.transporter) {
@@ -58,19 +60,26 @@ export class MailService {
         this.logger.log(`Email successfully sent to ${to} [${subject}]`);
         return { sent: true, method: 'smtp' };
       } catch (error: any) {
-        this.logger.error(`Failed to send email to ${to}: ${error.message}`, error.stack);
+        this.logger.error(
+          `Failed to send email to ${to}: ${error.message}`,
+          error.stack,
+        );
         throw error;
       }
     }
 
     // Development Console Output
-    this.logger.log(`\n=======================================================`);
+    this.logger.log(
+      `\n=======================================================`,
+    );
     this.logger.log(`[DEV EMAIL SIMULATION]`);
     this.logger.log(`TO:      ${to}`);
     this.logger.log(`FROM:    ${this.defaultFrom}`);
     this.logger.log(`SUBJECT: ${subject}`);
     this.logger.log(`BODY:\n${text || html}`);
-    this.logger.log(`=======================================================\n`);
+    this.logger.log(
+      `=======================================================\n`,
+    );
 
     return { sent: true, method: 'console' };
   }

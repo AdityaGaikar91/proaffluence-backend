@@ -37,8 +37,14 @@ export class CashflowsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Add a new trade cashflow entry (Save Entry)' })
-  @ApiResponse({ status: 201, description: 'Trade entry successfully queued for review.' })
-  @ApiResponse({ status: 400, description: 'Invalid group head or validation failure.' })
+  @ApiResponse({
+    status: 201,
+    description: 'Trade entry successfully queued for review.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid group head or validation failure.',
+  })
   async create(
     @Body() dto: CreateCashflowDto,
     @CurrentUser() user: { id: string; name?: string; role?: string },
@@ -47,15 +53,25 @@ export class CashflowsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List cashflows with status tabs, search, and pagination' })
-  @ApiResponse({ status: 200, description: 'Returns cashflow rows with tab counts.' })
+  @ApiOperation({
+    summary: 'List cashflows with status tabs, search, and pagination',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns cashflow rows with tab counts.',
+  })
   async findAll(@Query() query: QueryCashflowDto) {
     return this.cashflowsService.findAll(query);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get single cashflow entry with complete audit trail' })
-  @ApiResponse({ status: 200, description: 'Returns cashflow entry with audit log.' })
+  @ApiOperation({
+    summary: 'Get single cashflow entry with complete audit trail',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns cashflow entry with audit log.',
+  })
   @ApiResponse({ status: 404, description: 'Entry not found.' })
   async findOne(@Param('id') id: string) {
     return this.cashflowsService.findOne(id);
@@ -63,7 +79,10 @@ export class CashflowsController {
 
   @Patch(':id/correct')
   @ApiOperation({ summary: 'Correct cashflow record with mandatory reason' })
-  @ApiResponse({ status: 200, description: 'Record updated and re-queued for review.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Record updated and re-queued for review.',
+  })
   async correct(
     @Param('id') id: string,
     @Body() dto: UpdateCashflowDto,
@@ -127,7 +146,9 @@ export class CashflowsController {
     @CurrentUser() user: { id: string; name?: string },
   ) {
     if (!dto.reason?.trim()) {
-      throw new BadRequestException('A mandatory reason is required for batch returns.');
+      throw new BadRequestException(
+        'A mandatory reason is required for batch returns.',
+      );
     }
     return this.cashflowsService.bulkReturn(dto.ids, dto.reason.trim(), user);
   }
