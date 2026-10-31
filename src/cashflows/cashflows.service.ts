@@ -9,7 +9,7 @@ import { UpdateCashflowDto } from './dto/update-cashflow.dto';
 import { VoidCashflowDto } from './dto/void-cashflow.dto';
 import { ReturnCashflowDto } from './dto/return-cashflow.dto';
 import { QueryCashflowDto } from './dto/query-cashflow.dto';
-import { ApprovalStatus, AuditAction, Prisma } from '@prisma/client';
+import { ApprovalStatus, AssetCategory, AuditAction, Prisma } from '@prisma/client';
 import {
   parsePaginationParams,
   createPaginationMeta,
@@ -153,8 +153,8 @@ export class CashflowsService {
    * Query all cashflows with status tabs, search, and pagination.
    */
   async findAll(query: QueryCashflowDto) {
-    const { statusTab = 'ALL', search, month, groupHeadName } = query;
-    const { page, limit, skip, take } = parsePaginationParams(query, 'srNo');
+    const { statusTab = 'ALL', search, month, groupHeadName, category } = query;
+    const { page, limit, skip, take, sortBy, sortOrder } = parsePaginationParams(query, 'srNo');
 
     // 1. Calculate status counts
     const [allCount, pendingCount, approvedCount, returnedCount] =
@@ -185,6 +185,13 @@ export class CashflowsService {
       where.approvalStatus = ApprovalStatus.RETURNED;
     }
 
+    if (category && category.trim() && category.toUpperCase() !== 'ALL') {
+      const catUpper = category.trim().toUpperCase();
+      if (Object.values(AssetCategory).includes(catUpper as AssetCategory)) {
+        where.category = catUpper as AssetCategory;
+      }
+    }
+
     if (month) {
       where.month = { equals: month, mode: 'insensitive' };
     }
@@ -207,11 +214,17 @@ export class CashflowsService {
       ];
     }
 
+    const sortField =
+      sortBy &&
+      ['srNo', 'dateOfEntry', 'month', 'amounts', 'transactionDate'].includes(sortBy)
+        ? sortBy
+        : 'srNo';
+
     const [total, items] = await Promise.all([
       this.prisma.masterCashflow.count({ where }),
       this.prisma.masterCashflow.findMany({
         where,
-        orderBy: [{ srNo: 'desc' }, { id: 'asc' }],
+        orderBy: [{ [sortField]: sortOrder }, { id: 'asc' }],
         skip,
         take,
       }),

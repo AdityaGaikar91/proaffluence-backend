@@ -12,6 +12,13 @@ export class QueryCashflowDto extends PaginationQueryDto {
   statusTab?: 'ALL' | 'PENDING' | 'APPROVED' | 'RETURNED' = 'ALL';
 
   @ApiPropertyOptional({
+    description: 'Filter by asset category (e.g. MF, PMS, STOCKS, or All)',
+  })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @ApiPropertyOptional({
     description:
       'Search across Sr_No, Group Head, Client Owner, Sub Category, etc.',
   })

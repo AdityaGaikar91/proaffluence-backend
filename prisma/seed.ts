@@ -324,13 +324,6 @@ async function seedHybridRules() {
 }
 
 async function seedSampleCashflowsAndBalances() {
-  // Check if cashflows already exist
-  const count = await prisma.masterCashflow.count();
-  if (count > 0) {
-    console.log(`[Seed] Master cashflows already seeded (${count} records). Skipping.`);
-    return;
-  }
-
   const staffUser = await prisma.user.findFirst({
     where: { role: 'staff_entry' },
   });
@@ -343,6 +336,20 @@ async function seedSampleCashflowsAndBalances() {
 
   if (groupHeads.length === 0) return;
 
+  // Check if cashflows already exist with desired count (20) and PAN user IDs
+  const count = await prisma.masterCashflow.count();
+  const sample = await prisma.masterCashflow.findFirst({ select: { userId: true } });
+  const needsReseed = count !== 20 || (sample && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(sample.userId));
+
+  if (!needsReseed) {
+    console.log(`[Seed] Master cashflows already seeded (${count} records with PAN User IDs). Skipping.`);
+    return;
+  }
+
+  console.log(`[Seed] Resetting and re-seeding master cashflows to 20 records with PAN User IDs...`);
+  await prisma.auditTrail.deleteMany({ where: { cashflowId: { not: null } } });
+  await prisma.masterCashflow.deleteMany({});
+
   const MF_FUNDS = [
     'Nippon India Multi Cap Fund - Growth',
     'Edelweiss Small Cap Fund - Regular Plan - Growth',
@@ -352,8 +359,8 @@ async function seedSampleCashflowsAndBalances() {
     'Union Small Cap Fund - Growth',
   ];
 
-  // Seed 45 Initial Cashflows
-  for (let i = 1; i <= 45; i++) {
+  // Seed 20 Initial Cashflows
+  for (let i = 1; i <= 20; i++) {
     const head = groupHeads[(i - 1) % groupHeads.length];
     const family = head.familyMembers[(i - 1) % head.familyMembers.length];
     const isMf = i % 5 !== 0;
@@ -368,9 +375,9 @@ async function seedSampleCashflowsAndBalances() {
     const xirr = Number((4 + ((i - 1) % 11) * 1.35).toFixed(2));
 
     const status =
-      i % 9 === 0
+      i === 1 || i === 5 || i === 9 || i === 15
         ? ApprovalStatus.APPROVED
-        : i % 11 === 0
+        : i === 4 || i === 12
           ? ApprovalStatus.RETURNED
           : ApprovalStatus.PENDING;
 
@@ -378,7 +385,7 @@ async function seedSampleCashflowsAndBalances() {
       data: {
         srNo: i,
         dateOfEntry: entryDate,
-        userId: staffUser.id,
+        userId: head.pan, // Client PAN card stored in User-Id field
         month,
         clientOwner: 'Anil K. (Wealth Advisor)',
         groupHeadId: head.id,
@@ -417,6 +424,8 @@ async function seedSampleCashflowsAndBalances() {
       },
     });
   }
+
+  console.log(`[Seed] Seeded initial 20 cashflow transactions with PAN User IDs.`);
 
   // Seed Initial Closing Balances for September 2026
   let cbSr = 1;
@@ -459,7 +468,7 @@ async function seedSampleCashflowsAndBalances() {
     }
   }
 
-  console.log(`[Seed] Seeded initial 45 cashflow transactions and September 2026 closing balances.`);
+  console.log(`[Seed] Seeded initial 20 cashflow transactions and September 2026 closing balances.`);
 }
 
 async function main() {
