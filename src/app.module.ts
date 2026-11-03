@@ -9,6 +9,10 @@ import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
 import { CashflowsModule } from './cashflows/cashflows.module';
 import { GroupHeadsModule } from './group-heads/group-heads.module';
+import { ClosingBalancesModule } from './closing-balances/closing-balances.module';
+import { BenchmarksModule } from './benchmarks/benchmarks.module';
+import { ReportsModule } from './reports/reports.module';
+import { CommunicationsModule } from './communications/communications.module';
 
 @Module({
   imports: [
@@ -23,6 +27,10 @@ import { GroupHeadsModule } from './group-heads/group-heads.module';
     HealthModule,
     CashflowsModule,
     GroupHeadsModule,
+    ClosingBalancesModule,
+    BenchmarksModule,
+    ReportsModule,
+    CommunicationsModule,
   ],
 })
 export class AppModule {}

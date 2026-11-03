@@ -2,11 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
+
 export interface SendMailOptions {
   to: string;
   subject: string;
   text?: string;
   html?: string;
+  attachments?: MailAttachment[];
 }
 
 @Injectable()
@@ -45,20 +52,26 @@ export class MailService {
 
   async sendMail(
     options: SendMailOptions,
-  ): Promise<{ sent: boolean; method: 'smtp' | 'console' }> {
-    const { to, subject, text, html } = options;
+  ): Promise<{ sent: boolean; method: 'smtp' | 'console'; messageId: string }> {
+    const { to, subject, text, html, attachments } = options;
+    const generatedMsgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
     if (this.transporter) {
       try {
-        await this.transporter.sendMail({
+        const info = await this.transporter.sendMail({
           from: this.defaultFrom,
           to,
           subject,
           text,
           html,
+          attachments,
         });
         this.logger.log(`Email successfully sent to ${to} [${subject}]`);
-        return { sent: true, method: 'smtp' };
+        return {
+          sent: true,
+          method: 'smtp',
+          messageId: info?.messageId || generatedMsgId,
+        };
       } catch (error: any) {
         this.logger.error(
           `Failed to send email to ${to}: ${error.message}`,
@@ -73,15 +86,20 @@ export class MailService {
       `\n=======================================================`,
     );
     this.logger.log(`[DEV EMAIL SIMULATION]`);
-    this.logger.log(`TO:      ${to}`);
-    this.logger.log(`FROM:    ${this.defaultFrom}`);
-    this.logger.log(`SUBJECT: ${subject}`);
+    this.logger.log(`TO:          ${to}`);
+    this.logger.log(`FROM:        ${this.defaultFrom}`);
+    this.logger.log(`SUBJECT:     ${subject}`);
+    if (attachments && attachments.length > 0) {
+      this.logger.log(
+        `ATTACHMENTS: ${attachments.map((a) => `${a.filename} (${a.content.length} bytes)`).join(', ')}`,
+      );
+    }
     this.logger.log(`BODY:\n${text || html}`);
     this.logger.log(
       `=======================================================\n`,
     );
 
-    return { sent: true, method: 'console' };
+    return { sent: true, method: 'console', messageId: generatedMsgId };
   }
 
   async sendPasswordResetEmail(to: string, resetUrl: string): Promise<void> {

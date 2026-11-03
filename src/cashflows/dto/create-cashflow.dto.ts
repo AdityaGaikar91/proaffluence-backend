@@ -87,7 +87,7 @@ export class CreateCashflowDto {
     enum: ['Purchase', 'Redemption', 'PURCHASE', 'REDEMPTION'],
   })
   @Transform(({ value }) =>
-    typeof value === 'string' ? value.toUpperCase() : value,
+    typeof value === 'string' ? value.toUpperCase() : '',
   )
   @IsEnum(TransactionType, {
     message: 'Transaction_Type must be Purchase or Redemption',
@@ -96,11 +96,14 @@ export class CreateCashflowDto {
 
   @ApiProperty({
     example: 'MF',
-    enum: ['MF', 'PMS', 'Stocks', 'Equity', 'Debt', 'Other'],
+    enum: ['MF', 'PMS', 'Stocks', 'STOCK', 'Equity', 'Debt', 'Other'],
   })
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.toUpperCase() : value,
-  )
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') return '';
+    const upper = value.trim().toUpperCase();
+    if (upper === 'STOCK') return 'STOCKS';
+    return upper;
+  })
   @IsEnum(AssetCategory, {
     message: 'Category must be one of: MF, PMS, STOCKS',
   })
@@ -117,6 +120,11 @@ export class CreateCashflowDto {
   @ApiProperty({
     example: 150000,
     description: 'Gross transaction amount in INR',
+  })
+  @Transform(({ value }) => {
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) return value;
+    return Math.round(n * 100) / 100;
   })
   @IsNumber()
   Amounts: number;

@@ -25,11 +25,13 @@ import { ReturnCashflowDto } from './dto/return-cashflow.dto';
 import { BulkActionDto } from './dto/bulk-action.dto';
 import { QueryCashflowDto } from './dto/query-cashflow.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('Master Cashflows')
 @ApiCookieAuth('proaffluence.session_token')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, RolesGuard)
 @Controller('api/v1/cashflows')
 export class CashflowsController {
   constructor(private readonly cashflowsService: CashflowsService) {}
@@ -92,6 +94,7 @@ export class CashflowsController {
   }
 
   @Post(':id/void')
+  @Roles('manager', 'super_admin')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Void a cashflow record with mandatory reason' })
   @ApiResponse({ status: 200, description: 'Record marked as voided.' })
@@ -104,6 +107,7 @@ export class CashflowsController {
   }
 
   @Post(':id/approve')
+  @Roles('manager', 'super_admin')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Manager approve a pending cashflow record' })
   @ApiResponse({ status: 200, description: 'Record approved.' })
@@ -115,6 +119,7 @@ export class CashflowsController {
   }
 
   @Post(':id/return')
+  @Roles('manager', 'super_admin')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Manager return a cashflow record for correction' })
   @ApiResponse({ status: 200, description: 'Record returned with reason.' })
@@ -127,6 +132,7 @@ export class CashflowsController {
   }
 
   @Post('bulk-approve')
+  @Roles('manager', 'super_admin')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Batch approve multiple pending cashflows' })
   @ApiResponse({ status: 200, description: 'Count of approved entries.' })
@@ -138,6 +144,7 @@ export class CashflowsController {
   }
 
   @Post('bulk-return')
+  @Roles('manager', 'super_admin')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Batch return multiple cashflows for correction' })
   @ApiResponse({ status: 200, description: 'Count of returned entries.' })

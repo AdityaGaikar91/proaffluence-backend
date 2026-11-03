@@ -73,9 +73,14 @@ async function bootstrap() {
     return authHandler(req, res);
   });
 
-  // Mount standard body parsers with strict 100kb payload size limit
-  app.use(express.json({ limit: '100kb' }));
-  app.use(express.urlencoded({ extended: true, limit: '100kb' }));
+  // Body parsers: default 35mb so base64 external PDF uploads fit (override via BODY_JSON_LIMIT)
+  const bodyJsonLimit =
+    configService.get<string>('BODY_JSON_LIMIT') ||
+    process.env.BODY_JSON_LIMIT ||
+    '35mb';
+  app.use(express.json({ limit: bodyJsonLimit }));
+  app.use(express.urlencoded({ extended: true, limit: bodyJsonLimit }));
+  logger.log(`HTTP JSON/urlencoded body limit: ${bodyJsonLimit}`);
 
   // Global sanitized exception filter to prevent sensitive leakage
   app.useGlobalFilters(new AllExceptionsFilter());
