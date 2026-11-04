@@ -656,17 +656,25 @@ export class GroupHeadsService {
         );
       }
 
-      const member = groupHead.familyMembers.find((m) => m.id === memberId);
+      const decodedKey = decodeURIComponent(memberId).trim();
+      // Prefer UUID PK; fall back to case-insensitive name under this mandate
+      // so older clients that still send member names do not 404.
+      const member =
+        groupHead.familyMembers.find((m) => m.id === decodedKey) ||
+        groupHead.familyMembers.find(
+          (m) => m.name.toLowerCase() === decodedKey.toLowerCase(),
+        );
+
       if (!member) {
         throw new NotFoundException(
-          `Family member with ID "${memberId}" was not found under this mandate.`,
+          `Family member "${decodedKey}" was not found under this mandate.`,
         );
       }
 
       // Check if this member is directly referenced in cashflows or balances
       const [cashflowRefCount, balanceRefCount] = await Promise.all([
-        tx.masterCashflow.count({ where: { familyMemberId: memberId } }),
-        tx.closingBalance.count({ where: { familyMemberId: memberId } }),
+        tx.masterCashflow.count({ where: { familyMemberId: member.id } }),
+        tx.closingBalance.count({ where: { familyMemberId: member.id } }),
       ]);
 
       if (cashflowRefCount > 0 || balanceRefCount > 0) {
@@ -676,7 +684,7 @@ export class GroupHeadsService {
       }
 
       await tx.familyMember.delete({
-        where: { id: memberId },
+        where: { id: member.id },
       });
 
       if (actorId) {

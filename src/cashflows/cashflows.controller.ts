@@ -66,6 +66,18 @@ export class CashflowsController {
     return this.cashflowsService.findAll(query);
   }
 
+  @Get('next-sr-no')
+  @ApiOperation({
+    summary: 'Preview the next Sr_No that will be assigned on create',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns { nextSrNo } from max(srNo) + 1.',
+  })
+  async getNextSrNo() {
+    return this.cashflowsService.getNextSrNo();
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get single cashflow entry with complete audit trail',

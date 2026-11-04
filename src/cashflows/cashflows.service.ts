@@ -53,6 +53,17 @@ export class CashflowsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
+   * Next global Sr_No for the Add Trade Entry preview (max existing + 1).
+   */
+  async getNextSrNo(): Promise<{ nextSrNo: number }> {
+    const lastRecord = await this.prisma.masterCashflow.findFirst({
+      orderBy: { srNo: 'desc' },
+      select: { srNo: true },
+    });
+    return { nextSrNo: (lastRecord?.srNo ?? 0) + 1 };
+  }
+
+  /**
    * Record a new trade entry (Add Trade Entry Modal).
    */
   async create(
@@ -312,71 +323,139 @@ export class CashflowsService {
     const actorName = currentUser.name || 'Staff User';
 
     return this.prisma.$transaction(async (tx) => {
-      // Prepare diffs
-      const diffs: Record<string, { from: any; to: any }> = {};
-      if (
-        dto.Amounts !== undefined &&
-        Number(existing.amounts) !== dto.Amounts
-      ) {
-        diffs.Amounts = { from: Number(existing.amounts), to: dto.Amounts };
-      }
-      if (
-        dto.New_Investments !== undefined &&
-        Number(existing.newInvestments) !== dto.New_Investments
-      ) {
-        diffs.New_Investments = {
-          from: Number(existing.newInvestments),
-          to: dto.New_Investments,
-        };
-      }
-      if (
-        dto.Profit_Loss !== undefined &&
-        Number(existing.profitLoss) !== dto.Profit_Loss
-      ) {
-        diffs.Profit_Loss = {
-          from: Number(existing.profitLoss),
-          to: dto.Profit_Loss,
-        };
-      }
-      if (dto.XIRR !== undefined && Number(existing.xirr) !== dto.XIRR) {
-        diffs.XIRR = { from: Number(existing.xirr), to: dto.XIRR };
-      }
-      if (
-        dto.Transaction_Type &&
-        existing.transactionType !== dto.Transaction_Type
-      ) {
-        diffs.Transaction_Type = {
-          from: existing.transactionType,
-          to: dto.Transaction_Type,
-        };
-      }
-      if (dto.Sub_Category && existing.subCategory !== dto.Sub_Category) {
-        diffs.Sub_Category = {
-          from: existing.subCategory,
-          to: dto.Sub_Category,
-        };
+      const nextAmounts =
+        dto.Amounts !== undefined ? dto.Amounts : Number(existing.amounts);
+      const nextNewInvestments =
+        dto.New_Investments !== undefined
+          ? dto.New_Investments
+          : Number(existing.newInvestments);
+      const nextProfitLoss =
+        dto.Profit_Loss !== undefined
+          ? dto.Profit_Loss
+          : Number(existing.profitLoss);
+      const nextXirr =
+        dto.XIRR !== undefined ? dto.XIRR : Number(existing.xirr);
+      const nextTransactionType =
+        dto.Transaction_Type || existing.transactionType;
+      const nextCategory = dto.Category || existing.category;
+      const nextSubCategory = dto.Sub_Category || existing.subCategory;
+      const nextClientOwner =
+        dto.Client_Owner?.trim() || existing.clientOwner;
+      const nextFamilyMemberName =
+        dto.Family_Member_Name?.trim() || existing.familyMemberName;
+      const nextTransactionDate =
+        dto.Transaction_Date || existing.transactionDate;
+      const nextUserId = dto.User_Id?.trim()
+        ? dto.User_Id.trim().toUpperCase()
+        : existing.userId;
+      const nextGroupHeadName =
+        dto.Group_Head_Name?.trim() || existing.groupHeadName;
+      const nextMonth =
+        dto.Month?.trim() ||
+        (dto.Transaction_Date
+          ? deriveMonthFromDate(dto.Transaction_Date)
+          : existing.month);
+
+      const changeRows: Array<{ field: string; from: string; to: string }> =
+        [];
+      const pushDiff = (
+        field: string,
+        from: string | number | null | undefined,
+        to: string | number | null | undefined,
+      ) => {
+        const fromStr = from == null ? '' : String(from);
+        const toStr = to == null ? '' : String(to);
+        if (fromStr !== toStr) {
+          changeRows.push({ field, from: fromStr, to: toStr });
+        }
+      };
+
+      pushDiff('Amounts', Number(existing.amounts), nextAmounts);
+      pushDiff(
+        'New_Investments',
+        Number(existing.newInvestments),
+        nextNewInvestments,
+      );
+      pushDiff('Profit_Loss', Number(existing.profitLoss), nextProfitLoss);
+      pushDiff('XIRR', Number(existing.xirr), nextXirr);
+      pushDiff(
+        'Transaction_Type',
+        existing.transactionType,
+        nextTransactionType,
+      );
+      pushDiff('Category', existing.category, nextCategory);
+      pushDiff('Sub_Category', existing.subCategory, nextSubCategory);
+      pushDiff('Client_Owner', existing.clientOwner, nextClientOwner);
+      pushDiff(
+        'Family_Member_Name',
+        existing.familyMemberName,
+        nextFamilyMemberName,
+      );
+      pushDiff(
+        'Transaction_Date',
+        existing.transactionDate,
+        nextTransactionDate,
+      );
+      pushDiff('User_Id', existing.userId, nextUserId);
+      pushDiff('Group_Head_Name', existing.groupHeadName, nextGroupHeadName);
+      pushDiff('Month', existing.month, nextMonth);
+
+      // Resolve group head + family member FK when mandate / beneficiary changes
+      let nextGroupHeadId = existing.groupHeadId;
+      let nextFamilyMemberId = existing.familyMemberId;
+
+      const groupHeadChanged =
+        nextGroupHeadName.trim().toLowerCase() !==
+        existing.groupHeadName.trim().toLowerCase();
+      const familyMemberChanged =
+        nextFamilyMemberName.trim().toLowerCase() !==
+        existing.familyMemberName.trim().toLowerCase();
+
+      if (groupHeadChanged || familyMemberChanged) {
+        const groupHead = await tx.groupHead.findFirst({
+          where: groupHeadChanged
+            ? {
+                name: {
+                  equals: nextGroupHeadName.trim(),
+                  mode: 'insensitive',
+                },
+              }
+            : { id: existing.groupHeadId },
+          include: { familyMembers: true },
+        });
+
+        if (groupHead) {
+          nextGroupHeadId = groupHead.id;
+          const match = groupHead.familyMembers.find(
+            (m) =>
+              m.name.trim().toLowerCase() ===
+              nextFamilyMemberName.trim().toLowerCase(),
+          );
+          nextFamilyMemberId = match?.id ?? null;
+        } else if (familyMemberChanged) {
+          nextFamilyMemberId = null;
+        }
       }
 
       // Update entry and set status back to PENDING for manager review
       const updated = await tx.masterCashflow.update({
         where: { id },
         data: {
-          amounts: dto.Amounts !== undefined ? dto.Amounts : existing.amounts,
-          newInvestments:
-            dto.New_Investments !== undefined
-              ? dto.New_Investments
-              : existing.newInvestments,
-          profitLoss:
-            dto.Profit_Loss !== undefined
-              ? dto.Profit_Loss
-              : existing.profitLoss,
-          xirr: dto.XIRR !== undefined ? dto.XIRR : existing.xirr,
-          transactionType: dto.Transaction_Type || existing.transactionType,
-          category: dto.Category || existing.category,
-          subCategory: dto.Sub_Category || existing.subCategory,
-          clientOwner: dto.Client_Owner || existing.clientOwner,
-          familyMemberName: dto.Family_Member_Name || existing.familyMemberName,
-          transactionDate: dto.Transaction_Date || existing.transactionDate,
+          amounts: nextAmounts,
+          newInvestments: nextNewInvestments,
+          profitLoss: nextProfitLoss,
+          xirr: nextXirr,
+          transactionType: nextTransactionType,
+          category: nextCategory,
+          subCategory: nextSubCategory,
+          clientOwner: nextClientOwner,
+          familyMemberName: nextFamilyMemberName,
+          familyMemberId: nextFamilyMemberId,
+          groupHeadId: nextGroupHeadId,
+          groupHeadName: nextGroupHeadName,
+          userId: nextUserId,
+          month: nextMonth,
+          transactionDate: nextTransactionDate,
           approvalStatus: ApprovalStatus.PENDING,
           returnReason: null,
           approvedById: null,
@@ -385,7 +464,7 @@ export class CashflowsService {
         },
       });
 
-      // Append correction to audit trail
+      // Append correction to audit trail (array shape matches UI + schema comment)
       await tx.auditTrail.create({
         data: {
           action: AuditAction.CORRECTED,
@@ -393,7 +472,7 @@ export class CashflowsService {
           userName: actorName,
           reason: dto.correctionReason,
           cashflowId: id,
-          changes: diffs,
+          changes: changeRows,
         },
       });
 
