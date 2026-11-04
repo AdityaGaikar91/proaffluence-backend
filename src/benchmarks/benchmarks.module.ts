@@ -5,10 +5,8 @@ import { BenchmarksController } from './benchmarks.controller';
 import { BenchmarksService } from './benchmarks.service';
 import { INDEX_FEED_PROVIDERS } from './providers/index-feed.types';
 import { NseArchivesProvider } from './providers/nse-archives.provider';
-import {
-  BseIndiaProvider,
-  NiftyIndicesTriProvider,
-} from './providers/unavailable.providers';
+import { NiftyIndicesTriProvider } from './providers/niftyindices-tri.provider';
+import { BseIndiaProvider } from './providers/unavailable.providers';
 
 @Module({
   imports: [PrismaModule, AuthModule],

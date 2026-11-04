@@ -60,9 +60,9 @@ const DEFAULT_BENCHMARKS: Array<{
     shortName: 'Nifty 50 TRI',
     returnType: BenchmarkReturnType.TRI,
     exchange: 'NSE',
-    provider: 'Manual / paid TRI source (no free feed)',
+    provider: 'niftyindices.com (TRI) — often login-gated; manual/bulk fallback',
     description:
-      'Includes capital price appreciation plus all dividend yields reinvested. Enter manually until a paid TRI source is configured.',
+      'Includes capital price appreciation plus all dividend yields reinvested. Free TRI POST may 302 to Sitefinity login; enter TRI via Manual/Bulk, or use labelled Nifty 50 PR as closest free series.',
     methodologyLabel: 'TRI (Total Return — Div. Reinvested)',
     isDefault: true,
   },
@@ -103,53 +103,6 @@ const DEFAULT_BENCHMARKS: Array<{
     isDefault: false,
   },
 ];
-
-export const DEFAULT_FY_RETURNS: Record<
-  BenchmarkCode,
-  Record<string, number | null>
-> = {
-  NIFTY_50_TRI: {
-    'FY 2026-27': 14.28,
-    'FY 2025-26': 9.73,
-    'FY 2024-25': 11.55,
-    'FY 2023-24': 28.01,
-    'FY 2022-23': -6.12,
-    'FY 2021-22': 18.42,
-    'FY 2020-21': 58.39,
-    'FY 2019-20': -21.1,
-    'Since Inception': 12.85,
-  },
-  NIFTY_50_PR: {
-    'FY 2026-27': 11.4,
-    'FY 2025-26': 16.9,
-    'FY 2024-25': -7.5,
-    'FY 2023-24': 26.35,
-    'FY 2022-23': 10.15,
-    'FY 2021-22': 8.3,
-    'FY 2020-21': 12.8,
-    'Since Inception': 10.4,
-  },
-  BSE_500: {
-    'FY 2026-27': 13.95,
-    'FY 2025-26': 21.15,
-    'FY 2024-25': -4.8,
-    'FY 2023-24': 32.4,
-    'FY 2022-23': 12.8,
-    'FY 2021-22': 10.95,
-    'FY 2020-21': 16.5,
-    'Since Inception': 14.1,
-  },
-  SENSEX: {
-    'FY 2026-27': 12.1,
-    'FY 2025-26': 17.65,
-    'FY 2024-25': -5.9,
-    'FY 2023-24': 26.8,
-    'FY 2022-23': 10.9,
-    'FY 2021-22': 9.25,
-    'FY 2020-21': 13.7,
-    'Since Inception': 11.9,
-  },
-};
 
 function normalizeDateToDdMmYyyy(raw: string): string {
   const trimmed = raw.trim();
@@ -243,22 +196,37 @@ export class BenchmarksService {
       const codeRecords = mappedRecords.filter((r) => r.indexCode === code);
       const latest = codeRecords[0];
       const meta = benchmarksMap[code];
+      const freeAvailable = code === BenchmarkCode.NIFTY_50_PR;
       feedHealth[code] = {
         indexCode: code,
         status: latest ? 'synced' : 'gap_detected',
         lastSyncDate: latest ? `${latest.date} 17:30 IST` : 'Pending Sync',
         latestClosingValue: latest?.closingValue ?? 0,
         missingDatesCount: latest ? 0 : 1,
-        providerSource: meta?.provider ?? 'NSE / BSE Free Feed',
+        providerSource: meta?.provider ?? 'Manual / bulk entry',
+        lastError: freeAvailable
+          ? undefined
+          : latest
+            ? undefined
+            : 'No free live feed confirmed — enter closing via Manual or Bulk.',
       };
     }
+
+    // Do not ship hard-coded FY % maps — dashboard TRI comes from annual-dashboard
+    // cashflow-weighted calc over IndicesData quotes. Empty maps avoid UI seed overlays.
+    const emptyFyReturns: Record<BenchmarkCode, Record<string, number | null>> = {
+      [BenchmarkCode.NIFTY_50_TRI]: {},
+      [BenchmarkCode.NIFTY_50_PR]: {},
+      [BenchmarkCode.BSE_500]: {},
+      [BenchmarkCode.SENSEX]: {},
+    };
 
     return {
       selectedBenchmark: BenchmarkCode.NIFTY_50_TRI,
       benchmarks: benchmarksMap,
       indicesData: mappedRecords,
       feedHealth,
-      fyReturns: DEFAULT_FY_RETURNS,
+      fyReturns: emptyFyReturns,
     };
   }
 

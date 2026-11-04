@@ -1,14 +1,19 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { BenchmarkCode } from '@prisma/client';
 import { NseArchivesProvider } from './nse-archives.provider';
-import {
-  BseIndiaProvider,
-  NiftyIndicesTriProvider,
-} from './unavailable.providers';
+import { NiftyIndicesTriProvider } from './niftyindices-tri.provider';
+import { BseIndiaProvider } from './unavailable.providers';
 import {
   FetchLike,
   lastCompletedMonthEnd,
   parseFlexibleDate,
 } from './index-feed.types';
+
+const TRI_SUCCESS = readFileSync(
+  join(__dirname, 'fixtures', 'niftyindices-tri-success.json'),
+  'utf8',
+);
 
 const CSV = [
   'Index Name,Index Date,Open Index Value,High Index Value,Low Index Value,Closing Index Value,Points Change,Change(%),Volume,Turnover (Rs. Cr.),P/E,P/B,Div Yield',
@@ -164,11 +169,87 @@ describe('NseArchivesProvider', () => {
   });
 });
 
-describe('unconfirmed providers', () => {
-  it('niftyindices TRI and BSE report unavailable with reason', async () => {
-    const tri = await new NiftyIndicesTriProvider().fetchRange();
-    const bse = await new BseIndiaProvider().fetchRange(BenchmarkCode.SENSEX);
+describe('NiftyIndicesTriProvider', () => {
+  it('parses documented d double-encoded TRI payload', () => {
+    const quotes = NiftyIndicesTriProvider.parseTriResponse(TRI_SUCCESS);
+    expect(quotes).toEqual([
+      { date: '31-01-2024', closingValue: 22150.25 },
+      { date: '29-02-2024', closingValue: 22310.4 },
+    ]);
+  });
+
+  it('builds cinfo string with dd-MMM-yyyy dates', () => {
+    expect(
+      NiftyIndicesTriProvider.buildCinfo(d('01-01-2024'), d('31-12-2024')),
+    ).toContain("startDate':'01-Jan-2024");
+  });
+
+  it('returns unavailable when feature flag disabled (default)', async () => {
+    const tri = await new NiftyIndicesTriProvider(undefined, {
+      enabled: false,
+    }).fetchRange(BenchmarkCode.NIFTY_50_TRI, d('01-01-2024'), d('31-01-2024'));
     expect(tri.ok).toBe(false);
+    if (!tri.ok) expect(tri.reason).toMatch(/NIFTYINDICES_TRI_ENABLED/);
+  });
+
+  it('returns unavailable on HTTP 302 login redirect', async () => {
+    const fetchImpl: FetchLike = async (url, init) => {
+      if (init?.method === 'POST') {
+        return {
+          status: 302,
+          text: async () =>
+            JSON.stringify({ Message: 'There was an error processing the request.' }),
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === 'location'
+                ? 'https://www.niftyindices.com/Sitefinity/Login'
+                : null,
+          },
+        };
+      }
+      return {
+        status: 200,
+        text: async () => '<html></html>',
+        headers: { get: () => null },
+      };
+    };
+    const tri = await new NiftyIndicesTriProvider(fetchImpl, {
+      enabled: true,
+      retries: 0,
+    }).fetchRange(BenchmarkCode.NIFTY_50_TRI, d('01-01-2024'), d('31-01-2024'));
+    expect(tri.ok).toBe(false);
+    if (!tri.ok) expect(tri.reason).toMatch(/login/i);
+  });
+
+  it('returns TRI quotes on HTTP 200', async () => {
+    const fetchImpl: FetchLike = async (_url, init) => {
+      if (init?.method === 'POST') {
+        return {
+          status: 200,
+          text: async () => TRI_SUCCESS,
+          headers: { get: () => null },
+        };
+      }
+      return {
+        status: 200,
+        text: async () => '<html></html>',
+        headers: { get: () => null },
+      };
+    };
+    const tri = await new NiftyIndicesTriProvider(fetchImpl, {
+      enabled: true,
+    }).fetchRange(BenchmarkCode.NIFTY_50_TRI, d('01-01-2024'), d('29-02-2024'));
+    expect(tri.ok).toBe(true);
+    if (tri.ok) {
+      expect(tri.seriesType).toBe('TRI');
+      expect(tri.quotes).toHaveLength(2);
+    }
+  });
+});
+
+describe('unconfirmed providers', () => {
+  it('BSE reports unavailable with reason', async () => {
+    const bse = await new BseIndiaProvider().fetchRange(BenchmarkCode.SENSEX);
     expect(bse.ok).toBe(false);
   });
 });

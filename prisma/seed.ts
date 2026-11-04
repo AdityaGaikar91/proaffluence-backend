@@ -282,13 +282,26 @@ async function seedBenchmarks() {
             indexCode: meta.code as BenchmarkCode,
             closingValue: q.closingValue,
             notes: q.notes,
-            source: 'FEED',
+            // Demo seed levels — not a live free feed sync
+            source: 'BULK_UPLOAD',
             updatedBy: 'System Seed',
           },
         });
       }
     }
   }
+
+  // Existing DBs may still label System Seed quotes as FEED ("Free Feed")
+  const relabelled = await prisma.indicesDataRecord.updateMany({
+    where: { updatedBy: 'System Seed', source: 'FEED' },
+    data: { source: 'BULK_UPLOAD' },
+  });
+  if (relabelled.count > 0) {
+    console.log(
+      `[Seed] Relabelled ${relabelled.count} System Seed quote(s) from FEED → BULK_UPLOAD.`,
+    );
+  }
+
   console.log(`[Seed] Seeded ${benchmarksData.length} benchmark index records and historical quotes.`);
 }
 

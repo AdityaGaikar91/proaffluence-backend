@@ -76,10 +76,21 @@ export function lastCompletedMonthEnd(now: Date = new Date()): Date {
   return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), 0));
 }
 
+/** Minimal fetch subset used by index feed providers (GET/POST, redirect control). */
 export type FetchLike = (
   url: string,
-  init?: { headers?: Record<string, string>; signal?: AbortSignal },
-) => Promise<{ status: number; text(): Promise<string> }>;
+  init?: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+    redirect?: RequestRedirect;
+  },
+) => Promise<{
+  status: number;
+  text(): Promise<string>;
+  headers?: { get(name: string): string | null };
+}>;
 
 export class HttpTimeoutError extends Error {}
 

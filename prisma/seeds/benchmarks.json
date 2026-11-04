@@ -5,21 +5,21 @@
     "shortName": "Nifty 50 TRI",
     "returnType": "TRI",
     "exchange": "NSE",
-    "provider": "NSE Indices Free Live Feed",
-    "description": "Includes capital price appreciation plus all dividend yields reinvested.",
+    "provider": "niftyindices.com (TRI) — often login-gated; manual/bulk fallback",
+    "description": "Includes capital price appreciation plus all dividend yields reinvested. Demo seed levels only — not a live free feed.",
     "methodologyLabel": "TRI (Total Return — Div. Reinvested)",
     "isDefault": true,
     "initialQuotes": [
-      { "date": "31-03-2018", "closingValue": 14980.55, "notes": "FY 2017-18 Closing (seed TRI)" },
-      { "date": "31-03-2019", "closingValue": 18120.40, "notes": "FY 2018-19 Closing (seed TRI)" },
-      { "date": "31-03-2020", "closingValue": 13850.10, "notes": "FY 2019-20 Closing (seed TRI)" },
-      { "date": "31-03-2021", "closingValue": 22040.75, "notes": "FY 2020-21 Closing (seed TRI)" },
-      { "date": "31-03-2022", "closingValue": 25110.45, "notes": "FY 2021-22 Closing" },
-      { "date": "31-03-2023", "closingValue": 24980.20, "notes": "FY 2022-23 Closing" },
-      { "date": "31-03-2024", "closingValue": 31970.65, "notes": "FY 2023-24 Closing" },
-      { "date": "31-03-2025", "closingValue": 35680.10, "notes": "FY 2024-25 Closing" },
-      { "date": "31-03-2026", "closingValue": 39150.80, "notes": "FY 2025-26 Closing" },
-      { "date": "30-09-2026", "closingValue": 41250.35, "notes": "HY1 2026-27 Closing" }
+      { "date": "31-03-2018", "closingValue": 14980.55, "notes": "System seed (demo) FY 2017-18 Closing" },
+      { "date": "31-03-2019", "closingValue": 18120.40, "notes": "System seed (demo) FY 2018-19 Closing" },
+      { "date": "31-03-2020", "closingValue": 13850.10, "notes": "System seed (demo) FY 2019-20 Closing" },
+      { "date": "31-03-2021", "closingValue": 22040.75, "notes": "System seed (demo) FY 2020-21 Closing" },
+      { "date": "31-03-2022", "closingValue": 25110.45, "notes": "System seed (demo) FY 2021-22 Closing" },
+      { "date": "31-03-2023", "closingValue": 24980.20, "notes": "System seed (demo) FY 2022-23 Closing" },
+      { "date": "31-03-2024", "closingValue": 31970.65, "notes": "System seed (demo) FY 2023-24 Closing" },
+      { "date": "31-03-2025", "closingValue": 35680.10, "notes": "System seed (demo) FY 2024-25 Closing" },
+      { "date": "31-03-2026", "closingValue": 39150.80, "notes": "System seed (demo) FY 2025-26 Closing" },
+      { "date": "30-09-2026", "closingValue": 41250.35, "notes": "System seed (demo) HY1 2026-27 Closing" }
     ]
   },
   {
@@ -28,13 +28,13 @@
     "shortName": "Nifty 50 PR",
     "returnType": "PR",
     "exchange": "NSE",
-    "provider": "NSE Free Spot Feed",
-    "description": "Capital gains price return only. Explicit fallback when TRI feed is unavailable.",
-    "methodologyLabel": "PR (Price Return Fallback)",
+    "provider": "NSE Archives (ind_close_all CSV)",
+    "description": "Capital gains price return only. Free NSE archives feed works for this series; labelled PR — not a TRI substitute.",
+    "methodologyLabel": "PR (Price Return — archives feed)",
     "isDefault": false,
     "initialQuotes": [
-      { "date": "31-03-2026", "closingValue": 24850.50, "notes": "FY 2025-26 Spot Closing" },
-      { "date": "30-09-2026", "closingValue": 26180.90, "notes": "HY1 2026-27 Spot Closing" }
+      { "date": "31-03-2026", "closingValue": 24850.50, "notes": "System seed (demo) FY 2025-26 Spot Closing" },
+      { "date": "30-09-2026", "closingValue": 26180.90, "notes": "System seed (demo) HY1 2026-27 Spot Closing" }
     ]
   },
   {
@@ -43,13 +43,13 @@
     "shortName": "BSE 500",
     "returnType": "TRI",
     "exchange": "BSE",
-    "provider": "BSE Direct Feed API",
-    "description": "Broad market benchmark covering over 93% of total market capitalization.",
+    "provider": "Manual / paid source (BSE API blocked)",
+    "description": "Broad market benchmark covering over 93% of total market capitalization. No confirmed free server feed.",
     "methodologyLabel": "Broad Market (93% Market Cap)",
     "isDefault": false,
     "initialQuotes": [
-      { "date": "31-03-2026", "closingValue": 36420.15, "notes": "FY 2025-26 Closing" },
-      { "date": "30-09-2026", "closingValue": 38900.50, "notes": "HY1 2026-27 Closing" }
+      { "date": "31-03-2026", "closingValue": 36420.15, "notes": "System seed (demo) FY 2025-26 Closing" },
+      { "date": "30-09-2026", "closingValue": 38900.50, "notes": "System seed (demo) HY1 2026-27 Closing" }
     ]
   },
   {
@@ -58,13 +58,13 @@
     "shortName": "Sensex",
     "returnType": "TRI",
     "exchange": "BSE",
-    "provider": "BSE Free Public Feed",
-    "description": "Flagship index representing 30 financially sound and market-leading Indian companies.",
+    "provider": "Manual / paid source (BSE API blocked)",
+    "description": "Flagship index representing 30 financially sound and market-leading Indian companies. No confirmed free server feed.",
     "methodologyLabel": "Large-Cap 30 Benchmark",
     "isDefault": false,
     "initialQuotes": [
-      { "date": "31-03-2026", "closingValue": 81200.75, "notes": "FY 2025-26 Closing" },
-      { "date": "30-09-2026", "closingValue": 85400.20, "notes": "HY1 2026-27 Closing" }
+      { "date": "31-03-2026", "closingValue": 81200.75, "notes": "System seed (demo) FY 2025-26 Closing" },
+      { "date": "30-09-2026", "closingValue": 85400.20, "notes": "System seed (demo) HY1 2026-27 Closing" }
     ]
   }
 ]
