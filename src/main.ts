@@ -25,7 +25,8 @@ async function bootstrap() {
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
   const trustProxy = configService.get<boolean>('TRUST_PROXY', false);
   const swaggerEnabled = configService.get<boolean>('SWAGGER_ENABLED', true);
-  const frontendOrigins = (configService.get<string>('FRONTEND_ORIGINS', 'http://localhost:3000'))
+  const frontendOrigins = configService
+    .get<string>('FRONTEND_ORIGINS', 'http://localhost:3000')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -57,9 +58,11 @@ async function bootstrap() {
   const authHandler = toNodeHandler(auth);
 
   // Mount Better Auth handler BEFORE body parser middleware,
-  // while allowing custom NestJS password reset routes to pass through to NestJS
+  // while allowing custom NestJS auth & password reset routes to pass through to NestJS
   app.use('/api/auth', (req, res, next) => {
     if (
+      req.path === '/me' ||
+      req.path.startsWith('/me?') ||
       req.path === '/forgot-password' ||
       req.path === '/reset-password' ||
       req.path.startsWith('/forgot-password?') ||
@@ -70,9 +73,14 @@ async function bootstrap() {
     return authHandler(req, res);
   });
 
-  // Mount standard body parsers with strict 100kb payload size limit
-  app.use(express.json({ limit: '100kb' }));
-  app.use(express.urlencoded({ extended: true, limit: '100kb' }));
+  // Body parsers: default 35mb so base64 external PDF uploads fit (override via BODY_JSON_LIMIT)
+  const bodyJsonLimit =
+    configService.get<string>('BODY_JSON_LIMIT') ||
+    process.env.BODY_JSON_LIMIT ||
+    '35mb';
+  app.use(express.json({ limit: bodyJsonLimit }));
+  app.use(express.urlencoded({ extended: true, limit: bodyJsonLimit }));
+  logger.log(`HTTP JSON/urlencoded body limit: ${bodyJsonLimit}`);
 
   // Global sanitized exception filter to prevent sensitive leakage
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -123,7 +131,9 @@ async function bootstrap() {
             if (path === '/get-session' && (methods as any)?.post) {
               delete (methods as any).post;
             }
-            for (const operation of Object.values(methods as Record<string, any>)) {
+            for (const operation of Object.values(
+              methods as Record<string, any>,
+            )) {
               if (operation && typeof operation === 'object') {
                 operation.tags = ['Auth'];
               }
@@ -139,7 +149,9 @@ async function bootstrap() {
           };
         }
       } catch (err: any) {
-        logger.warn(`Could not merge Better Auth schema into Swagger: ${err.message}`);
+        logger.warn(
+          `Could not merge Better Auth schema into Swagger: ${err.message}`,
+        );
       }
     }
 
@@ -159,8 +171,12 @@ async function bootstrap() {
       },
     });
 
-    logger.log(`Swagger UI active at: http://localhost:${port}/docs (also at /swagger and /api/docs)`);
-    logger.log(`Better Auth Reference UI active at: http://localhost:${port}/api/auth/reference`);
+    logger.log(
+      `Swagger UI active at: http://localhost:${port}/docs (also at /swagger and /api/docs)`,
+    );
+    logger.log(
+      `Better Auth Reference UI active at: http://localhost:${port}/api/auth/reference`,
+    );
   }
 
   await app.listen(port);

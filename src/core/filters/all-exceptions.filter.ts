@@ -35,8 +35,26 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return response.status(status).json(responsePayload);
     }
 
+    const error = exception as Error & { type?: string; status?: number; statusCode?: number };
+    const bodyLimit = process.env.BODY_JSON_LIMIT || '35mb';
+    const isPayloadTooLarge =
+      error?.name === 'PayloadTooLargeError' ||
+      error?.type === 'entity.too.large' ||
+      /request entity too large/i.test(error?.message || '');
+
+    if (isPayloadTooLarge) {
+      this.logger.warn(
+        `Payload too large on ${request.method} ${request.url} (limit ${bodyLimit})`,
+      );
+      return response.status(HttpStatus.PAYLOAD_TOO_LARGE).json({
+        statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
+        message: `Upload too large. Max body size is ${bodyLimit} (use a smaller PDF or multipart file upload).`,
+        timestamp: new Date().toISOString(),
+        path: request.url,
+      });
+    }
+
     // Unhandled / Internal Server Errors (e.g. Prisma or database runtime exceptions)
-    const error = exception as Error;
     this.logger.error(
       `Unhandled Exception on ${request.method} ${request.url}: ${error?.message || exception}`,
       error?.stack,

@@ -101,7 +101,9 @@ export class PasswordResetService {
     });
 
     if (!account) {
-      throw new BadRequestException('No credential account found for this user');
+      throw new BadRequestException(
+        'No credential account found for this user',
+      );
     }
 
     await this.prisma.account.update({

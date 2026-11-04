@@ -10,7 +10,8 @@ export class HealthController {
   @Get()
   @ApiOperation({
     summary: 'Service health check',
-    description: 'Public health probe endpoint for monitoring and uptime checks',
+    description:
+      'Public health probe endpoint for monitoring and uptime checks',
   })
   @ApiResponse({
     status: 200,

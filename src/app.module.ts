@@ -7,8 +7,12 @@ import { PrismaModule } from './core/prisma/prisma.module';
 import { MailModule } from './core/mail/mail.module';
 import { AuthModule } from './auth/auth.module';
 import { HealthModule } from './health/health.module';
-import { MeModule } from './me/me.module';
 import { CashflowsModule } from './cashflows/cashflows.module';
+import { GroupHeadsModule } from './group-heads/group-heads.module';
+import { ClosingBalancesModule } from './closing-balances/closing-balances.module';
+import { BenchmarksModule } from './benchmarks/benchmarks.module';
+import { ReportsModule } from './reports/reports.module';
+import { CommunicationsModule } from './communications/communications.module';
 
 @Module({
   imports: [
@@ -21,8 +25,12 @@ import { CashflowsModule } from './cashflows/cashflows.module';
     MailModule,
     AuthModule,
     HealthModule,
-    MeModule,
     CashflowsModule,
+    GroupHeadsModule,
+    ClosingBalancesModule,
+    BenchmarksModule,
+    ReportsModule,
+    CommunicationsModule,
   ],
 })
 export class AppModule {}

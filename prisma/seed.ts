@@ -188,16 +188,43 @@ async function seedGroupHeads() {
       });
       groupHeadId = created.id;
       console.log(`[Seed] Created Group Head: ${data.name} (${data.customId})`);
+    } else {
+      await prisma.groupHead.update({
+        where: { id: existing.id },
+        data: {
+          name: data.name,
+          contactPerson: data.contactPerson,
+          email: data.email,
+          secondaryEmail: data.secondaryEmail,
+          inceptionDate: data.inceptionDate,
+          pan: data.pan,
+          status: data.status,
+          notes: data.notes,
+          categories: data.categories,
+          totalAum: data.totalAum,
+          netInvestment: data.netInvestment,
+        },
+      });
+      console.log(`[Seed] Updated Group Head: ${data.name} (${data.customId})`);
     }
 
     if (groupHeadId && Array.isArray(familyMembers)) {
-      for (const name of familyMembers) {
+      for (const memberItem of familyMembers) {
+        const name = typeof memberItem === 'string' ? memberItem : memberItem.name;
+        const relationship = typeof memberItem === 'object' ? memberItem.relationship : undefined;
+        const pan = typeof memberItem === 'object' ? memberItem.pan : undefined;
+
         const mem = await prisma.familyMember.findUnique({
           where: { groupHeadId_name: { groupHeadId, name } },
         });
         if (!mem) {
           await prisma.familyMember.create({
-            data: { groupHeadId, name },
+            data: { groupHeadId, name, relationship, pan },
+          });
+        } else if (relationship || pan) {
+          await prisma.familyMember.update({
+            where: { id: mem.id },
+            data: { relationship, pan },
           });
         }
       }
@@ -297,13 +324,6 @@ async function seedHybridRules() {
 }
 
 async function seedSampleCashflowsAndBalances() {
-  // Check if cashflows already exist
-  const count = await prisma.masterCashflow.count();
-  if (count > 0) {
-    console.log(`[Seed] Master cashflows already seeded (${count} records). Skipping.`);
-    return;
-  }
-
   const staffUser = await prisma.user.findFirst({
     where: { role: 'staff_entry' },
   });
@@ -316,123 +336,190 @@ async function seedSampleCashflowsAndBalances() {
 
   if (groupHeads.length === 0) return;
 
-  const MF_FUNDS = [
-    'Nippon India Multi Cap Fund - Growth',
-    'Edelweiss Small Cap Fund - Regular Plan - Growth',
-    'HSBC Small Cap Fund - Growth',
-    'Helios Small Cap Fund - Growth',
-    'TRUSTMF Small Cap Fund - Growth',
-    'Union Small Cap Fund - Growth',
-  ];
+  // Check if cashflows already exist with desired count (20), PAN user IDs, and canonical sub-categories
+  const count = await prisma.masterCashflow.count();
+  const sample = await prisma.masterCashflow.findFirst({ select: { userId: true, subCategory: true } });
+  const needsReseed =
+    count !== 20 ||
+    (sample && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(sample.userId)) ||
+    (sample && !['EQUITY', 'DEBT', 'HYBRID'].includes(sample.subCategory));
 
-  // Seed 45 Initial Cashflows
-  for (let i = 1; i <= 45; i++) {
-    const head = groupHeads[(i - 1) % groupHeads.length];
-    const family = head.familyMembers[(i - 1) % head.familyMembers.length];
-    const isMf = i % 5 !== 0;
-    const txnDay = String(((i - 1) % 27) + 1).padStart(2, '0');
-    const txnMonth = i % 2 === 0 ? '09' : '08';
-    const txnDate = `${txnDay}-${txnMonth}-2026`;
-    const entryDate = `${txnDay}-${txnMonth}-2026`;
-    const month = txnMonth === '09' ? 'September 2026' : 'August 2026';
-    const amounts = Math.round(25000 + ((i - 1) % 17) * 18750);
-    const newInv = i % 7 === 0 ? 0 : Math.round(amounts * 0.82);
-    const pl = Math.round(amounts * (i % 3 === 0 ? -0.04 : 0.06));
-    const xirr = Number((4 + ((i - 1) % 11) * 1.35).toFixed(2));
+  if (!needsReseed) {
+    console.log(`[Seed] Master cashflows already seeded (${count} records with PAN User IDs and canonical sub-categories). Skipping.`);
+  } else {
+    console.log(`[Seed] Resetting and re-seeding master cashflows to 20 records with PAN User IDs and canonical sub-categories...`);
+    await prisma.auditTrail.deleteMany({ where: { cashflowId: { not: null } } });
+    await prisma.masterCashflow.deleteMany({});
 
-    const status =
-      i % 9 === 0
-        ? ApprovalStatus.APPROVED
-        : i % 11 === 0
-          ? ApprovalStatus.RETURNED
-          : ApprovalStatus.PENDING;
+    // Seed 20 Initial Cashflows
+    for (let i = 1; i <= 20; i++) {
+      const head = groupHeads[(i - 1) % groupHeads.length];
+      const family = head.familyMembers[(i - 1) % head.familyMembers.length];
+      const category =
+        i % 7 === 0
+          ? AssetCategory.PMS
+          : i % 2 === 0
+            ? AssetCategory.MF
+            : AssetCategory.STOCKS;
 
-    const cf = await prisma.masterCashflow.create({
-      data: {
-        srNo: i,
-        dateOfEntry: entryDate,
-        userId: staffUser.id,
-        month,
-        clientOwner: 'Anil K. (Wealth Advisor)',
-        groupHeadId: head.id,
-        groupHeadName: head.name,
-        familyMemberId: family?.id ?? null,
-        familyMemberName: family?.name ?? head.name,
-        transactionDate: txnDate,
-        transactionType: i % 4 === 0 ? TransactionType.REDEMPTION : TransactionType.PURCHASE,
-        category: isMf ? AssetCategory.MF : AssetCategory.PMS,
-        subCategory: isMf ? MF_FUNDS[(i - 1) % MF_FUNDS.length] : 'STALLION CORE FUND',
-        amounts,
-        newInvestments: newInv,
-        profitLoss: pl,
-        xirr,
-        approvalStatus: status,
-        returnReason:
-          status === ApprovalStatus.RETURNED
-            ? 'Reported trade diverges from custodian contract note — verify execution NAV'
-            : null,
-        submittedById: staffUser.id,
-        submittedByName: staffUser.name,
-        submittedAt: new Date(),
-        approvedByName: status === ApprovalStatus.APPROVED ? 'Priya S. (Manager)' : null,
-        approvedAt: status === ApprovalStatus.APPROVED ? new Date() : null,
-      },
-    });
+      let subCategory: string;
+      if (category === AssetCategory.MF) {
+        subCategory = i % 13 === 0 ? 'HYBRID' : i % 5 === 0 ? 'DEBT' : 'EQUITY';
+      } else {
+        subCategory = 'EQUITY';
+      }
 
-    // Create initial audit entry
-    await prisma.auditTrail.create({
-      data: {
-        action: AuditAction.CREATED,
-        userId: staffUser.id,
-        userName: staffUser.name,
-        reason: 'Initial staff trade entry.',
-        cashflowId: cf.id,
-      },
-    });
+      const txnDay = String(((i - 1) % 27) + 1).padStart(2, '0');
+      const txnMonth = i % 2 === 0 ? '09' : '08';
+      const txnDate = `${txnDay}-${txnMonth}-2026`;
+      const entryDate = `${txnDay}-${txnMonth}-2026`;
+      const month = txnMonth === '09' ? 'September 2026' : 'August 2026';
+      const amounts = Math.round(25000 + ((i - 1) % 17) * 18750);
+      const newInv = i % 7 === 0 ? 0 : Math.round(amounts * 0.82);
+      const pl = Math.round(amounts * (i % 3 === 0 ? -0.04 : 0.06));
+      const xirr = Number((4 + ((i - 1) % 11) * 1.35).toFixed(2));
+
+      const status =
+        i === 1 || i === 5 || i === 9 || i === 15
+          ? ApprovalStatus.APPROVED
+          : i === 4 || i === 12
+            ? ApprovalStatus.RETURNED
+            : ApprovalStatus.PENDING;
+
+      const cf = await prisma.masterCashflow.create({
+        data: {
+          srNo: i,
+          dateOfEntry: entryDate,
+          userId: head.pan, // Client PAN card stored in User-Id field
+          month,
+          clientOwner: 'Anil K. (Wealth Advisor)',
+          groupHeadId: head.id,
+          groupHeadName: head.name,
+          familyMemberId: family?.id ?? null,
+          familyMemberName: family?.name ?? head.name,
+          transactionDate: txnDate,
+          transactionType: i % 4 === 0 ? TransactionType.REDEMPTION : TransactionType.PURCHASE,
+          category,
+          subCategory,
+          amounts,
+          newInvestments: newInv,
+          profitLoss: pl,
+          xirr,
+          approvalStatus: status,
+          returnReason:
+            status === ApprovalStatus.RETURNED
+              ? 'Reported trade diverges from custodian contract note — verify execution NAV'
+              : null,
+          submittedById: staffUser.id,
+          submittedByName: staffUser.name,
+          submittedAt: new Date(),
+          approvedByName: status === ApprovalStatus.APPROVED ? 'Priya S. (Manager)' : null,
+          approvedAt: status === ApprovalStatus.APPROVED ? new Date() : null,
+        },
+      });
+
+      // Create initial audit entry
+      await prisma.auditTrail.create({
+        data: {
+          action: AuditAction.CREATED,
+          userId: staffUser.id,
+          userName: staffUser.name,
+          reason: 'Initial staff trade entry.',
+          cashflowId: cf.id,
+        },
+      });
+    }
+
+    console.log(`[Seed] Seeded initial 20 cashflow transactions with PAN User IDs and canonical sub-categories.`);
   }
 
-  // Seed Initial Closing Balances for September 2026
+  // Seed Initial Closing Balances for September 2026 with canonical Categories (MF, PMS, STOCKS) & Sub-Categories (EQUITY, DEBT, HYBRID)
+  console.log(`[Seed] Resetting and re-seeding closing balances with canonical categories and PAN user IDs...`);
+  await prisma.auditTrail.deleteMany({ where: { balanceId: { not: null } } });
+  await prisma.closingBalance.deleteMany({});
+
+  const standardCombinations: { category: AssetCategory; subCategory: string }[] = [
+    { category: AssetCategory.MF, subCategory: 'EQUITY' },
+    { category: AssetCategory.MF, subCategory: 'DEBT' },
+    { category: AssetCategory.MF, subCategory: 'HYBRID' },
+    { category: AssetCategory.PMS, subCategory: 'EQUITY' },
+    { category: AssetCategory.PMS, subCategory: 'DEBT' },
+    { category: AssetCategory.PMS, subCategory: 'HYBRID' },
+    { category: AssetCategory.STOCKS, subCategory: 'EQUITY' },
+  ];
+
   let cbSr = 1;
   for (const head of groupHeads) {
-    for (const mem of head.familyMembers) {
-      for (const cat of [AssetCategory.MF, AssetCategory.PMS]) {
-        const sub = cat === AssetCategory.MF ? MF_FUNDS[0] : 'STALLION CORE FUND';
-        const isMissing = cbSr % 9 === 0;
+    const applicableScenarios =
+      Array.isArray(head.categories) && head.categories.length > 0
+        ? standardCombinations.filter((s) =>
+            head.categories.includes(s.category),
+          )
+        : standardCombinations;
 
-        await prisma.closingBalance.upsert({
-          where: {
-            monthKey_groupHeadId_familyMemberName_category_subCategory: {
-              monthKey: '2026-09',
-              groupHeadId: head.id,
-              familyMemberName: mem.name,
-              category: cat,
-              subCategory: sub,
-            },
-          },
-          update: {},
-          create: {
+    for (const mem of head.familyMembers) {
+      for (const scenario of applicableScenarios) {
+        const isMissing = cbSr % 9 === 0;
+        const pan = (mem.pan || head.pan || 'PAN_NOT_FOUND').toUpperCase();
+
+        // Balanced status distribution: ~25% Approved, ~20% Returned (Rejected), ~55% Pending Review
+        let status: ApprovalStatus = ApprovalStatus.PENDING;
+        let returnReason: string | null = null;
+        let approvedByName: string | null = null;
+        let approvedAt: Date | null = null;
+
+        if (cbSr % 4 === 0) {
+          status = ApprovalStatus.APPROVED;
+          approvedByName = 'Priya S. (Manager)';
+          approvedAt = new Date();
+        } else if (cbSr % 5 === 0) {
+          status = ApprovalStatus.RETURNED;
+          returnReason =
+            cbSr % 2 === 0
+              ? 'Reported valuation diverges from custodian CAS statement — verify execution NAV'
+              : 'Valuation date discrepancy — reported month-end does not match fund fact sheet';
+        } else {
+          status = ApprovalStatus.PENDING;
+        }
+
+        const cb = await prisma.closingBalance.create({
+          data: {
             srNo: cbSr++,
             dateOfEntry: '30-09-2026',
-            userId: staffUser.id,
+            userId: pan,
             monthKey: '2026-09',
             month: 'September 2026',
             groupHeadId: head.id,
             groupHeadName: head.name,
             familyMemberId: mem.id,
             familyMemberName: mem.name,
-            category: cat,
-            subCategory: sub,
+            category: scenario.category,
+            subCategory: scenario.subCategory,
             closingAmount: isMissing ? null : Math.round(50000 + (cbSr % 19) * 12000),
-            approvalStatus: ApprovalStatus.PENDING,
+            approvalStatus: status,
+            returnReason,
             submittedById: staffUser.id,
             submittedByName: staffUser.name,
+            submittedAt: new Date(),
+            approvedByName,
+            approvedAt,
+          },
+        });
+
+        await prisma.auditTrail.create({
+          data: {
+            action: AuditAction.CREATED,
+            userId: staffUser.id,
+            userName: staffUser.name,
+            reason: 'Initial month valuation entry.',
+            balanceId: cb.id,
           },
         });
       }
     }
   }
 
-  console.log(`[Seed] Seeded initial 45 cashflow transactions and September 2026 closing balances.`);
+  console.log(`[Seed] Seeded ${cbSr - 1} closing balance records with canonical categories (MF, PMS, STOCKS) and PAN user IDs.`);
 }
 
 async function main() {
@@ -470,8 +557,15 @@ async function main() {
   // 3. Seed Hybrid Allocation Rules
   await seedHybridRules();
 
-  // 4. Seed Initial Master Cashflows and Closing Balances
-  await seedSampleCashflowsAndBalances();
+  // 4. Master Cashflows / Closing Balances — intentionally NOT seeded.
+  // Manual month-end testing requires an empty ledger; set SEED_SAMPLE_CASHFLOWS=true to opt in.
+  if (process.env.SEED_SAMPLE_CASHFLOWS === 'true') {
+    await seedSampleCashflowsAndBalances();
+  } else {
+    console.log(
+      '[Seed] Skipping master cashflows & closing balances (set SEED_SAMPLE_CASHFLOWS=true to seed sample trades).',
+    );
+  }
 
   console.log('[Seed] All database seed steps completed successfully! 🚀');
 }

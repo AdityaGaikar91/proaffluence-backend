@@ -11,7 +11,10 @@ const isSwaggerEnabled =
 
 const sessionExpiresIn = parseInt(process.env.SESSION_EXPIRES_IN || '1800', 10);
 const sessionUpdateAge = parseInt(process.env.SESSION_UPDATE_AGE || '300', 10);
-const signinRateLimitMax = parseInt(process.env.SIGNIN_RATE_LIMIT_MAX || '5', 10);
+const signinRateLimitMax = parseInt(
+  process.env.SIGNIN_RATE_LIMIT_MAX || '5',
+  10,
+);
 const signinRateLimitWindow = parseInt(
   process.env.SIGNIN_RATE_LIMIT_WINDOW || '60',
   10,
@@ -22,7 +25,8 @@ const trustedOrigins = (process.env.FRONTEND_ORIGINS || 'http://localhost:3000')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-const sameSite = (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax';
+const sameSite =
+  (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax';
 
 const ac = createAccessControl({});
 

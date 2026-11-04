@@ -13,7 +13,12 @@
     "categories": ["MF", "PMS"],
     "totalAum": 17345177,
     "netInvestment": 12050722,
-    "familyMembers": ["Rajesh ABC", "Priya ABC", "ABC Family Trust", "ABC HUF"]
+    "familyMembers": [
+      { "name": "Rajesh ABC", "relationship": "Self", "pan": "ABCDE1234F" },
+      { "name": "Priya ABC", "relationship": "Spouse", "pan": "ABCDE5678G" },
+      { "name": "ABC Family Trust", "relationship": "Trust", "pan": "AABTA1122D" },
+      { "name": "ABC HUF", "relationship": "HUF", "pan": "AACHA3344E" }
+    ]
   },
   {
     "id": "singhania",
@@ -29,7 +34,12 @@
     "categories": ["MF", "PMS", "STOCKS"],
     "totalAum": 27095458,
     "netInvestment": 14142957,
-    "familyMembers": ["Aditya Singhania", "Rhea Singhania", "Kabir Singhania", "Singhania HUF"]
+    "familyMembers": [
+      { "name": "Aditya Singhania", "relationship": "Self", "pan": "AAACS8821K" },
+      { "name": "Rhea Singhania", "relationship": "Spouse", "pan": "AAACS8822L" },
+      { "name": "Kabir Singhania", "relationship": "Son", "pan": "AAACS8823M" },
+      { "name": "Singhania HUF", "relationship": "HUF", "pan": "AACHS8824N" }
+    ]
   },
   {
     "id": "sharma",
@@ -45,7 +55,11 @@
     "categories": ["MF", "PMS"],
     "totalAum": 19800000,
     "netInvestment": 11500000,
-    "familyMembers": ["Sunil Sharma", "Meena Sharma", "Sharma Family Trust"]
+    "familyMembers": [
+      { "name": "Sunil Sharma", "relationship": "Self", "pan": "BHPPS9123M" },
+      { "name": "Meena Sharma", "relationship": "Spouse", "pan": "BHPPS9124N" },
+      { "name": "Sharma Family Trust", "relationship": "Trust", "pan": "AABTS9125P" }
+    ]
   },
   {
     "id": "mehta",
@@ -53,6 +67,7 @@
     "name": "Mehta HUF",
     "contactPerson": "Harish Mehta",
     "email": "mehta.huf@example.com",
+    "secondaryEmail": "accounts@mehtagroup.in",
     "inceptionDate": "01-04-2021",
     "pan": "AACHM4410E",
     "status": "Active",
@@ -60,7 +75,11 @@
     "categories": ["MF", "PMS"],
     "totalAum": 14200000,
     "netInvestment": 9800000,
-    "familyMembers": ["Harish Mehta (Karta)", "Kavita Mehta", "Mehta HUF"]
+    "familyMembers": [
+      { "name": "Harish Mehta (Karta)", "relationship": "Karta", "pan": "AACHM4410E" },
+      { "name": "Kavita Mehta", "relationship": "Coparcener", "pan": "AABPM4411F" },
+      { "name": "Mehta HUF", "relationship": "HUF", "pan": "AACHM4412G" }
+    ]
   },
   {
     "id": "kapoor",
@@ -68,6 +87,7 @@
     "name": "Kapoor Trust",
     "contactPerson": "Rajiv Kapoor",
     "email": "kapoor.trust@example.com",
+    "secondaryEmail": "rajiv.kapoor@kapoorholdings.com",
     "inceptionDate": "10-10-2019",
     "pan": "AABTK7788P",
     "status": "Active",
@@ -75,6 +95,206 @@
     "categories": ["MF", "PMS"],
     "totalAum": 32500000,
     "netInvestment": 21000000,
-    "familyMembers": ["Rajiv Kapoor", "Trust Beneficiary A", "Trust Beneficiary B"]
+    "familyMembers": [
+      { "name": "Rajiv Kapoor", "relationship": "Managing Trustee", "pan": "AAAPK7788P" },
+      { "name": "Trust Beneficiary A", "relationship": "Beneficiary", "pan": "AAAPK7789Q" },
+      { "name": "Trust Beneficiary B", "relationship": "Beneficiary", "pan": "AAAPK7790R" }
+    ]
+  },
+  {
+    "id": "desai",
+    "customId": "GH-0106",
+    "name": "Desai Group",
+    "contactPerson": "Nitin Desai",
+    "email": "desai@example.com",
+    "secondaryEmail": "finance@desai-enterprises.com",
+    "inceptionDate": "12-05-2022",
+    "pan": "AAPPD5566L",
+    "status": "Active",
+    "notes": "Corporate treasury surplus deployed into short duration and arbitrage funds.",
+    "categories": ["MF", "PMS", "STOCKS"],
+    "totalAum": 18400000,
+    "netInvestment": 13000000,
+    "familyMembers": [
+      { "name": "Nitin Desai", "relationship": "Director", "pan": "AAPPD5566L" },
+      { "name": "Aarti Desai", "relationship": "Director", "pan": "AAPPD5567M" },
+      { "name": "Desai Enterprises Ltd", "relationship": "Corporate Entity", "pan": "AACCD5568N" }
+    ]
+  },
+  {
+    "id": "iyer",
+    "customId": "GH-0107",
+    "name": "Iyer Family",
+    "contactPerson": "Ramesh Iyer",
+    "email": "iyer.family@example.com",
+    "secondaryEmail": "ramesh.iyer@globaltech.sg",
+    "inceptionDate": "20-09-2021",
+    "pan": "AAAPI1289R",
+    "status": "Active",
+    "notes": "NRI client mandate, managed under strict PIS portfolio guidelines.",
+    "categories": ["MF", "PMS"],
+    "totalAum": 22100000,
+    "netInvestment": 16000000,
+    "familyMembers": [
+      { "name": "Ramesh Iyer", "relationship": "Primary (NRI)", "pan": "AAAPI1289R" },
+      { "name": "Lakshmi Iyer", "relationship": "Joint Holder", "pan": "AAAPI1290S" },
+      { "name": "Anand Iyer", "relationship": "Beneficiary", "pan": "AAAPI1291T" }
+    ]
+  },
+  {
+    "id": "nair",
+    "customId": "GH-0108",
+    "name": "Nair Holdings",
+    "contactPerson": "Gopalan Nair",
+    "email": "nair@example.com",
+    "secondaryEmail": "gopalan.nair@nairholdings.co.in",
+    "inceptionDate": "01-11-2020",
+    "pan": "AACCN3344Q",
+    "status": "Active",
+    "notes": "Holding company portfolio with heavy emphasis on discretionary PMS strategies.",
+    "categories": ["PMS", "STOCKS"],
+    "totalAum": 29500000,
+    "netInvestment": 18500000,
+    "familyMembers": [
+      { "name": "Gopalan Nair", "relationship": "Chairman", "pan": "AAAPN3344Q" },
+      { "name": "Sujata Nair", "relationship": "Director", "pan": "AAAPN3345R" }
+    ]
+  },
+  {
+    "id": "singh",
+    "customId": "GH-0109",
+    "name": "Singh Capital",
+    "contactPerson": "Harpreet Singh",
+    "email": "singh.cap@example.com",
+    "secondaryEmail": "harpreet@singhcapital.in",
+    "inceptionDate": "14-02-2021",
+    "pan": "AAFPS7711K",
+    "status": "Active",
+    "notes": "Active equity trader transitioning towards institutional PMS portfolios.",
+    "categories": ["MF", "PMS", "STOCKS"],
+    "totalAum": 16700000,
+    "netInvestment": 10500000,
+    "familyMembers": [
+      { "name": "Harpreet Singh", "relationship": "Managing Partner", "pan": "AAFPS7711K" },
+      { "name": "Gurpreet Kaur", "relationship": "Partner", "pan": "AAFPS7712L" },
+      { "name": "Singh Capital LLC", "relationship": "Entity", "pan": "AABCS7713M" }
+    ]
+  },
+  {
+    "id": "patel",
+    "customId": "GH-0110",
+    "name": "Patel Associates",
+    "contactPerson": "Bhavesh Patel",
+    "email": "patel.assoc@example.com",
+    "secondaryEmail": "bhavesh@patelchemical.com",
+    "inceptionDate": "30-03-2020",
+    "pan": "AABCP9900H",
+    "status": "Active",
+    "notes": "Chemical export business founders with aggressive capital growth objectives.",
+    "categories": ["MF", "PMS", "STOCKS"],
+    "totalAum": 24800000,
+    "netInvestment": 15200000,
+    "familyMembers": [
+      { "name": "Bhavesh Patel", "relationship": "Partner", "pan": "AAAPP9900H" },
+      { "name": "Alpa Patel", "relationship": "Partner", "pan": "AAAPP9901J" },
+      { "name": "Patel Overseas HUF", "relationship": "HUF", "pan": "AACHP9902K" }
+    ]
+  },
+  {
+    "id": "gupta",
+    "customId": "GH-0111",
+    "name": "Gupta Family",
+    "contactPerson": "Vivek Gupta",
+    "email": "gupta@example.com",
+    "secondaryEmail": "vivek.gupta@guptafamily.in",
+    "inceptionDate": "18-07-2021",
+    "pan": "AAPPG2233J",
+    "status": "Active",
+    "notes": "Family office portfolio split across midcap and thematic funds.",
+    "categories": ["MF", "PMS"],
+    "totalAum": 15900000,
+    "netInvestment": 11000000,
+    "familyMembers": [
+      { "name": "Vivek Gupta", "relationship": "Self", "pan": "AAPPG2233J" },
+      { "name": "Shalini Gupta", "relationship": "Spouse", "pan": "AAPPG2234K" },
+      { "name": "Gupta Family Trust", "relationship": "Trust", "pan": "AABTG2235L" }
+    ]
+  },
+  {
+    "id": "rao",
+    "customId": "GH-0112",
+    "name": "Rao Investments",
+    "contactPerson": "Krishna Rao",
+    "email": "rao.inv@example.com",
+    "secondaryEmail": "krishna.rao@techinvest.in",
+    "inceptionDate": "22-12-2021",
+    "pan": "AACCR6677B",
+    "status": "Active",
+    "notes": "Tech executive angel gains parked in market-linked wealth structures.",
+    "categories": ["MF", "PMS"],
+    "totalAum": 21300000,
+    "netInvestment": 14000000,
+    "familyMembers": [
+      { "name": "Krishna Rao", "relationship": "Self", "pan": "AAAPR6677B" },
+      { "name": "Deepa Rao", "relationship": "Spouse", "pan": "AAAPR6678C" }
+    ]
+  },
+  {
+    "id": "khan",
+    "customId": "GH-0113",
+    "name": "Khan Portfolio",
+    "contactPerson": "Tariq Khan",
+    "email": "khan.port@example.com",
+    "secondaryEmail": "tariq@khanholdings.ae",
+    "inceptionDate": "05-01-2022",
+    "pan": "AAPTK8899C",
+    "status": "Inactive",
+    "notes": "Under annual KYC refresh. Transactions temporarily paused pending FATCA declaration.",
+    "categories": ["MF"],
+    "totalAum": 8400000,
+    "netInvestment": 6500000,
+    "familyMembers": [
+      { "name": "Tariq Khan", "relationship": "Primary", "pan": "AAPTK8899C" },
+      { "name": "Yasmin Khan", "relationship": "Joint Holder", "pan": "AAPTK8900D" }
+    ]
+  },
+  {
+    "id": "verma",
+    "customId": "GH-0114",
+    "name": "Verma Estate",
+    "contactPerson": "Alok Verma",
+    "email": "verma@example.com",
+    "secondaryEmail": "alok.verma@vermaestates.in",
+    "inceptionDate": "11-11-2020",
+    "pan": "AABCV3322N",
+    "status": "Active",
+    "notes": "Real estate monetization proceeds allocated into multi-asset conservative hybrid baskets.",
+    "categories": ["MF", "PMS"],
+    "totalAum": 31000000,
+    "netInvestment": 22000000,
+    "familyMembers": [
+      { "name": "Alok Verma", "relationship": "Self", "pan": "AAPPV3322N" },
+      { "name": "Sangeeta Verma", "relationship": "Spouse", "pan": "AAPPV3323P" },
+      { "name": "Verma HUF", "relationship": "HUF", "pan": "AACHV3324Q" }
+    ]
+  },
+  {
+    "id": "kothari",
+    "customId": "GH-0115",
+    "name": "Meera Kothari HUF",
+    "contactPerson": "Meera Kothari",
+    "email": "meera.kothari@kotharigroup.in",
+    "secondaryEmail": "accounts@kotharigroup.in",
+    "inceptionDate": "15-03-2022",
+    "pan": "AABCK9911D",
+    "status": "Active",
+    "notes": "New family mandate. Awaiting primary dispatch email confirmation from client.",
+    "categories": ["MF", "PMS"],
+    "totalAum": 11500000,
+    "netInvestment": 8200000,
+    "familyMembers": [
+      { "name": "Meera Kothari", "relationship": "Karta", "pan": "AABCK9911D" },
+      { "name": "Kothari HUF", "relationship": "HUF", "pan": "AACHK9912E" }
+    ]
   }
 ]

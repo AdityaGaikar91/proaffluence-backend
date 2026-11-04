@@ -9,5 +9,6 @@ export const appConfig = registerAs('app', () => ({
     .filter(Boolean),
   trustProxy: process.env.TRUST_PROXY === 'true',
   swaggerEnabled:
-    process.env.NODE_ENV !== 'production' || process.env.SWAGGER_ENABLED === 'true',
+    process.env.NODE_ENV !== 'production' ||
+    process.env.SWAGGER_ENABLED === 'true',
 }));
