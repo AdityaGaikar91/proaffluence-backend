@@ -9,6 +9,8 @@ import {
   BenchmarkCode,
 } from '@prisma/client';
 import { PrismaService } from '../core/prisma/prisma.service';
+import { ReportingFreezeService } from '../core/reporting/reporting-freeze.service';
+import { maskPan } from '../core/security/pan-mask.util';
 import { OTemplateEngine } from './o-template.engine';
 import { PdfGeneratorService } from './pdf-generator.service';
 import {
@@ -94,6 +96,7 @@ export class ReportsService {
     private readonly prisma: PrismaService,
     private readonly oTemplateEngine: OTemplateEngine,
     private readonly pdfGenerator: PdfGeneratorService,
+    private readonly freezeService: ReportingFreezeService,
   ) {}
 
   async getPreFlightAudit(
@@ -468,6 +471,7 @@ export class ReportsService {
   ) {
     const period = (dto.period || '30-09-2026').trim();
     const monthKey = dto.monthKey || deriveMonthKeyFromPeriod(period);
+    await this.freezeService.assertPeriodFrozenForDispatch(period);
     const requestedId = (dto.groupHeadId || '').trim();
     const runAll =
       requestedId.toLowerCase() === 'all' || requestedId === '*';
@@ -992,20 +996,22 @@ export class ReportsService {
     );
 
     const panPassword = wbResult.groupHead?.pan || 'ABCDE1234F';
+    const encrypted = params.encrypted ?? true;
     const pdfResult = await this.pdfGenerator.generateDashboardPdf({
       groupHeadId: wbResult.groupHead?.id || params.groupHeadId,
       groupHeadName: wbResult.groupHead?.name || params.groupHeadId,
       panPassword,
       workbookPath: wbResult.filePath,
       dashboard: wbResult.dashboard,
-      encrypted: params.encrypted ?? true,
+      encrypted,
+      allowFallback: !encrypted,
     });
 
     return {
       ...pdfResult,
       groupHeadId: wbResult.groupHead?.id || params.groupHeadId,
       groupHeadName: wbResult.groupHead?.name || params.groupHeadId,
-      pan: panPassword,
+      pan: maskPan(panPassword),
     };
   }
 
@@ -1040,6 +1046,7 @@ export class ReportsService {
         panPasswordRule: pdf.passwordRule,
         isPasswordProtected: pdf.isPasswordProtected,
         engine: pdf.engine,
+        needsReview: pdf.needsReview,
         downloadUrl: `/api/v1/reports/pdf/${gh.id}?encrypted=${encrypted}`,
         previewUrl: `/api/v1/reports/pdf/${gh.id}?encrypted=false`,
       });

@@ -7,6 +7,7 @@ import {
   lastDayOfMonthKey,
   monthKeyFromDate,
   parseDdMmYyyy,
+  tryParseDdMmYyyy,
   resolveReturnBy12MonthRule,
   sumClosingBalancesAtPeriodEnd,
   sumOpeningClosingBeforeDate,
@@ -182,6 +183,24 @@ describe('category mid-FY 12-month rule', () => {
     });
     expect(resolved.method).toBe('AR');
     expect(resolved.value).toBe(-4.1);
+  });
+});
+
+describe('parseDdMmYyyy (no silent default)', () => {
+  it('parses valid dd-MM-yyyy', () => {
+    const d = parseDdMmYyyy('30-09-2026');
+    expect(d.getUTCFullYear()).toBe(2026);
+    expect(d.getUTCMonth()).toBe(8);
+    expect(d.getUTCDate()).toBe(30);
+  });
+
+  it('rejects invalid calendar day', () => {
+    expect(() => parseDdMmYyyy('31-02-2099')).toThrow(/Invalid calendar date/);
+  });
+
+  it('rejects garbage', () => {
+    expect(() => parseDdMmYyyy('garbage')).toThrow(/Unrecognized date/);
+    expect(tryParseDdMmYyyy('garbage')).toBeNull();
   });
 });
 

@@ -14,6 +14,8 @@ import {
 } from '@nestjs/common';
 import { FyDashboardResultPayload } from './o-template.engine';
 import { EXTERNAL_PDF_SLOTS, ExternalPdfSlot } from './dto/reports.dto';
+import { maskPan } from '../core/security/pan-mask.util';
+import { libreOfficeSemaphore } from '../jobs/libreoffice.semaphore';
 
 const execFileAsync = promisify(execFile);
 
@@ -291,10 +293,13 @@ export class PdfGeneratorService {
     workbookPath?: string;
     dashboard: FyDashboardResultPayload;
     encrypted?: boolean;
+    /** When false (default for encrypted), LibreOffice failure does not fall back to PDFKit. */
+    allowFallback?: boolean;
   }): Promise<{
     filePath: string;
     buffer: Buffer;
     engine: 'libreoffice' | 'pdfkit-fallback';
+    needsReview: boolean;
     isPasswordProtected: boolean;
     passwordRule: string;
     totalMergedPages: number;
@@ -308,6 +313,10 @@ export class PdfGeneratorService {
       dashboard,
       encrypted = false,
     } = params;
+    const allowFallback =
+      params.allowFallback !== undefined
+        ? params.allowFallback
+        : !encrypted;
 
     const period = dashboard.header.toPeriod || '30-09-2026';
     const safeName = (groupHeadName || groupHeadId || 'Client').replace(
@@ -319,6 +328,7 @@ export class PdfGeneratorService {
     const pdfFileName = `FY_Annual_Dashboard_${safeName}_${safeDate}${suffix}.pdf`;
     const targetPdfPath = path.join(this.pdfDir, pdfFileName);
     const password = (panPassword || 'ABCDE1234F').trim().toUpperCase();
+    const maskedRule = `Client PAN (${maskPan(password)})`;
 
     const externalPdfs = this.listExternalPdfs(groupHeadId, period);
     const externalPagesCount = externalPdfs.reduce(
@@ -330,21 +340,33 @@ export class PdfGeneratorService {
     // Step 1: Generate unencrypted Page 1 (FY Annual Dashboard)
     let page1Buffer: Buffer | null = null;
     let engineUsed: 'libreoffice' | 'pdfkit-fallback' = 'pdfkit-fallback';
+    let loError: string | null = null;
 
     if (workbookPath && fs.existsSync(workbookPath)) {
+      const profileDir = path.join(
+        this.pdfDir,
+        `.lo-profile-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+      );
       try {
-        await execFileAsync(
-          'soffice',
-          [
-            '--headless',
-            '--convert-to',
-            'pdf:calc_pdf_Export',
-            '--outdir',
-            this.pdfDir,
-            workbookPath,
-          ],
-          { timeout: 12000 },
-        );
+        fs.mkdirSync(profileDir, { recursive: true });
+        await libreOfficeSemaphore.runExclusive(async () => {
+          await execFileAsync(
+            'soffice',
+            [
+              `--accept=socket,host=127.0.0.1,port=0;urp;`,
+              `-env:UserInstallation=file://${profileDir}`,
+              '--headless',
+              '--nologo',
+              '--nofirststartwizard',
+              '--convert-to',
+              'pdf:calc_pdf_Export',
+              '--outdir',
+              this.pdfDir,
+              workbookPath,
+            ],
+            { timeout: 12000, killSignal: 'SIGKILL' },
+          );
+        });
         const loOut = path.join(
           this.pdfDir,
           `${path.basename(workbookPath, '.xlsx')}.pdf`,
@@ -352,16 +374,32 @@ export class PdfGeneratorService {
         if (fs.existsSync(loOut)) {
           page1Buffer = fs.readFileSync(loOut);
           engineUsed = 'libreoffice';
+        } else {
+          loError = 'LibreOffice completed but output PDF was missing';
         }
-      } catch {
+      } catch (err: any) {
+        loError = err?.message || String(err);
         this.logger.debug(
-          'Headless LibreOffice (soffice) not available on host; using built-in A4 PDF engine fallback for Page 1.',
+          `Headless LibreOffice (soffice) failed: ${loError}`,
         );
+      } finally {
+        try {
+          fs.rmSync(profileDir, { recursive: true, force: true });
+        } catch {
+          /* ignore profile cleanup errors */
+        }
       }
+    } else if (encrypted && !allowFallback) {
+      loError = 'O_Template workbook path missing for LibreOffice conversion';
     }
 
-    // If no external PDFs exist and encrypted is requested and LibreOffice wasn't used,
-    // we can render Page 1 directly with native PDFKit password encryption.
+    if (!page1Buffer && !allowFallback) {
+      throw new ServiceUnavailableException(
+        `Cannot generate client PDF without LibreOffice (fail-closed). ${loError || 'soffice unavailable'}`,
+      );
+    }
+
+    // Preview-only: PDFKit fallback when LO missing
     if (!page1Buffer && externalPdfs.length === 0) {
       const directBuffer = await this.renderA4DashboardWithPdfKit({
         dashboard,
@@ -373,8 +411,9 @@ export class PdfGeneratorService {
         filePath: targetPdfPath,
         buffer: directBuffer,
         engine: 'pdfkit-fallback',
+        needsReview: true,
         isPasswordProtected: encrypted,
-        passwordRule: `Client PAN (${password})`,
+        passwordRule: maskedRule,
         totalMergedPages: 1,
         externalPdfsCount: 0,
       };
@@ -385,6 +424,7 @@ export class PdfGeneratorService {
         dashboard,
         totalPages: totalExpectedPages,
       });
+      engineUsed = 'pdfkit-fallback';
     }
 
     // Step 2: Merge Page 1 with all uploaded external PDFs via pdf-lib
@@ -445,8 +485,9 @@ export class PdfGeneratorService {
       filePath: targetPdfPath,
       buffer: finalBuffer,
       engine: engineUsed,
+      needsReview: engineUsed !== 'libreoffice',
       isPasswordProtected: encrypted,
-      passwordRule: `Client PAN (${password})`,
+      passwordRule: maskedRule,
       totalMergedPages,
       externalPdfsCount: externalPdfs.length,
     };

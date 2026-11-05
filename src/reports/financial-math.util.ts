@@ -5,25 +5,66 @@
  * 2. Point-to-Point Absolute Return AR_Val (for periods < 364 days)
  * 3. Hybrid 50/50 Asset Allocation Split (or custom scheme-level overrides)
  * 4. Cashflow-Weighted Benchmark Triangulation (Nifty 50 TRI / BSE 500 / Sensex)
+ *
+ * Absolute-return money math uses decimal.js to avoid IEEE drift on large AUM.
  */
+import Decimal from 'decimal.js';
 
 export interface DatedCashflow {
   date: Date;
   amount: number; // Negative for investments/opening, Positive for redemptions/closing
 }
 
+function utcCalendarDate(yyyy: number, mm: number, dd: number): Date | null {
+  if (!Number.isFinite(yyyy) || !Number.isFinite(mm) || !Number.isFinite(dd)) {
+    return null;
+  }
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  const dt = new Date(Date.UTC(yyyy, mm - 1, dd));
+  if (
+    dt.getUTCFullYear() !== yyyy ||
+    dt.getUTCMonth() !== mm - 1 ||
+    dt.getUTCDate() !== dd
+  ) {
+    return null;
+  }
+  return dt;
+}
+
+/**
+ * Parses dd-MM-yyyy or yyyy-MM-dd into a UTC calendar Date.
+ * Throws on invalid input — never silently defaults to a hardcoded day.
+ */
 export function parseDdMmYyyy(dateStr: string): Date {
   const trimmed = (dateStr || '').trim();
   if (/^\d{2}-\d{2}-\d{4}$/.test(trimmed)) {
     const [dd, mm, yyyy] = trimmed.split('-').map(Number);
-    return new Date(Date.UTC(yyyy, mm - 1, dd));
+    const dt = utcCalendarDate(yyyy, mm, dd);
+    if (!dt) {
+      throw new Error(`Invalid calendar date "${trimmed}" (expected dd-MM-yyyy)`);
+    }
+    return dt;
   }
   if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
     const [yyyy, mm, dd] = trimmed.slice(0, 10).split('-').map(Number);
-    return new Date(Date.UTC(yyyy, mm - 1, dd));
+    const dt = utcCalendarDate(yyyy, mm, dd);
+    if (!dt) {
+      throw new Error(`Invalid calendar date "${trimmed}" (expected yyyy-MM-dd)`);
+    }
+    return dt;
   }
-  const parsed = new Date(trimmed);
-  return isNaN(parsed.getTime()) ? new Date(Date.UTC(2026, 8, 30)) : parsed;
+  throw new Error(
+    `Unrecognized date "${trimmed}". Use dd-MM-yyyy or yyyy-MM-dd.`,
+  );
+}
+
+/** Safe variant for optional parsing — returns null instead of throwing. */
+export function tryParseDdMmYyyy(dateStr: string): Date | null {
+  try {
+    return parseDdMmYyyy(dateStr);
+  } catch {
+    return null;
+  }
 }
 
 export function formatDdMmYyyy(date: Date): string {
@@ -129,11 +170,14 @@ export function calculateAbsoluteReturn(params: {
   redemptions: number;
   closingBalance: number;
 }): number {
-  const { openingBalance, purchases, redemptions, closingBalance } = params;
-  const denominator = openingBalance + purchases - redemptions;
-  if (Math.abs(denominator) <= 0.001) return 0;
-  const netGain = closingBalance + redemptions - openingBalance - purchases;
-  return Number(((netGain / denominator) * 100).toFixed(2));
+  const opening = new Decimal(params.openingBalance || 0);
+  const purchases = new Decimal(params.purchases || 0);
+  const redemptions = new Decimal(params.redemptions || 0);
+  const closing = new Decimal(params.closingBalance || 0);
+  const denominator = opening.plus(purchases).minus(redemptions);
+  if (denominator.abs().lte(0.001)) return 0;
+  const netGain = closing.plus(redemptions).minus(opening).minus(purchases);
+  return Number(netGain.div(denominator).times(100).toFixed(2));
 }
 
 /**

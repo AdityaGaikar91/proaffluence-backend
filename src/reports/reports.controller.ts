@@ -134,7 +134,23 @@ export class ReportsController {
   }
 
   @Post('external-pdfs/:groupHeadId')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 15 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const ok =
+          file.mimetype === 'application/pdf' ||
+          (file.originalname || '').toLowerCase().endsWith('.pdf');
+        if (!ok) {
+          return cb(
+            new BadRequestException('Only PDF uploads are accepted.') as any,
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
   @ApiOperation({
     summary:
       'Upload an external PDF (MF Summary, PMS Summary, Stock Summary, Stallion Statement) via multipart/form-data or base64 to merge after Page 1',
@@ -162,6 +178,15 @@ export class ReportsController {
     if (!buffer || buffer.length === 0) {
       throw new BadRequestException(
         'Please provide a PDF file via multipart "file" field or "base64Content" JSON property.',
+      );
+    }
+    if (buffer.length > 15 * 1024 * 1024) {
+      throw new BadRequestException('PDF exceeds 15MB upload limit.');
+    }
+    // Magic-byte check — reject non-PDF payloads
+    if (buffer.subarray(0, 5).toString('utf8') !== '%PDF-') {
+      throw new BadRequestException(
+        'Upload rejected: file does not start with %PDF- magic bytes.',
       );
     }
 
