@@ -248,6 +248,22 @@ describe('Scope Points 5-8: Benchmarks, Hybrid O_Template Engine, PDF & Communic
         .expect(403);
     });
 
+    it('rejects calculate when period is not frozen', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/reports/unfreeze')
+        .set('Cookie', managerCookie)
+        .send({
+          period: '30-09-2026',
+          reason: 'Ensure unfrozen before calculate gate test.',
+        });
+
+      await request(app.getHttpServer())
+        .post('/api/v1/reports/calculate')
+        .set('Cookie', managerCookie)
+        .send({ period: '30-09-2026', groupHeadId: 'abc' })
+        .expect(409);
+    });
+
     it('allows manager to freeze, execute O_Template calculation run, and unfreeze with audit reason', async () => {
       const freezeRes = await request(app.getHttpServer())
         .post('/api/v1/reports/freeze')
@@ -439,13 +455,14 @@ describe('Scope Points 5-8: Benchmarks, Hybrid O_Template Engine, PDF & Communic
       });
       expect(loadedMerged.getPageCount()).toBe(5);
 
-      // 4b. Encrypted merged PDF requires qpdf — never silently return plaintext
+      // 4b. Encrypted client PDF is fail-closed: LibreOffice (+ qpdf for merges) required
       const encryptedMerged = await request(app.getHttpServer())
         .get('/api/v1/reports/pdf/abc?period=30-09-2026&encrypted=true')
         .set('Cookie', managerCookie);
-      // PDFKit encrypts Page-1-only; merged external pages need qpdf on host
       if (encryptedMerged.status === 503) {
-        expect(encryptedMerged.body.message || encryptedMerged.text).toMatch(/qpdf/i);
+        expect(encryptedMerged.body.message || encryptedMerged.text).toMatch(
+          /qpdf|LibreOffice|soffice|fail-closed/i,
+        );
       } else {
         expect(encryptedMerged.status).toBe(200);
         expect(encryptedMerged.headers['x-pdf-password-protected']).toBe('true');

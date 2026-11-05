@@ -5,6 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../core/prisma/prisma.service';
+import { ReportingFreezeService } from '../core/reporting/reporting-freeze.service';
 import { QueryClosingBalanceDto } from './dto/query-closing-balance.dto';
 import { UpdateClosingAmountsDto } from './dto/update-closing-amounts.dto';
 import { InitializeMonthDto } from './dto/initialize-month.dto';
@@ -99,7 +100,10 @@ const MAX_VALUATION_AMOUNT = 999999999999999; // 15 digits, safe within IEEE-754
 
 @Injectable()
 export class ClosingBalancesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly freezeService: ReportingFreezeService,
+  ) {}
 
   /**
    * List closing balances with server pagination, status counts, category and search filtering.
@@ -309,6 +313,7 @@ export class ClosingBalancesService {
         'Invalid monthKey. Expected YYYY-MM format with valid month (01-12).',
       );
     }
+    await this.freezeService.assertMonthKeyNotFrozen(monthKey);
 
     const actorName = currentUser.name || 'Staff User';
     const monthLabel = monthLabelFromKey(monthKey);
@@ -464,6 +469,15 @@ export class ClosingBalancesService {
 
     if (ids.length === 0) {
       return { updatedCount: 0, message: 'No updates provided.' };
+    }
+
+    const preview = await this.prisma.closingBalance.findMany({
+      where: { id: { in: ids }, voided: false },
+      select: { monthKey: true },
+    });
+    const monthKeys = [...new Set(preview.map((r) => r.monthKey))];
+    for (const mk of monthKeys) {
+      await this.freezeService.assertMonthKeyNotFrozen(mk);
     }
 
     // Strict validation of values: reject booleans, strings, negatives, non-finite, and overflow numbers
@@ -626,6 +640,7 @@ export class ClosingBalancesService {
         `Invalid monthKey "${monthKey}". Expected YYYY-MM format with valid month (01-12).`,
       );
     }
+    await this.freezeService.assertMonthKeyNotFrozen(monthKey);
 
     // Validate Closing_Amount if provided (DTO already rounds to 2 dp)
     if (dto.Closing_Amount !== undefined && dto.Closing_Amount !== null) {
@@ -865,6 +880,11 @@ export class ClosingBalancesService {
         'Closing balance entry is already approved.',
       );
     }
+    this.freezeService.assertNotSelfApprove(
+      existing.submittedById,
+      currentUser.id,
+    );
+    await this.freezeService.assertMonthKeyNotFrozen(existing.monthKey);
 
     const actorName = currentUser.name || 'Manager';
 
@@ -922,6 +942,7 @@ export class ClosingBalancesService {
         'Only pending closing balances can be returned for correction.',
       );
     }
+    await this.freezeService.assertMonthKeyNotFrozen(existing.monthKey);
 
     const actorName = currentUser.name || 'Manager';
     const cleanReason = dto.reason.trim();
@@ -968,9 +989,14 @@ export class ClosingBalancesService {
           voided: false,
           approvalStatus: ApprovalStatus.PENDING,
           closingAmount: { not: null },
+          NOT: { submittedById: currentUser.id },
         },
-        select: { id: true },
+        select: { id: true, monthKey: true },
       });
+
+      for (const r of eligibleRecords) {
+        await this.freezeService.assertMonthKeyNotFrozen(r.monthKey);
+      }
 
       const eligibleIds = eligibleRecords.map((r) => r.id);
 
@@ -1033,8 +1059,12 @@ export class ClosingBalancesService {
           voided: false,
           approvalStatus: ApprovalStatus.PENDING,
         },
-        select: { id: true },
+        select: { id: true, monthKey: true },
       });
+
+      for (const r of eligibleRecords) {
+        await this.freezeService.assertMonthKeyNotFrozen(r.monthKey);
+      }
 
       const eligibleIds = eligibleRecords.map((r) => r.id);
 
@@ -1078,6 +1108,7 @@ export class ClosingBalancesService {
         'Invalid monthKey. Expected YYYY-MM format with valid month (01-12).',
       );
     }
+    await this.freezeService.assertMonthKeyNotFrozen(monthKey);
 
     const actorName = currentUser.name || 'Manager';
 
@@ -1117,6 +1148,7 @@ export class ClosingBalancesService {
           monthKey,
           voided: false,
           approvalStatus: ApprovalStatus.PENDING,
+          NOT: { submittedById: currentUser.id },
           ...(!allowMissingOverride ? { closingAmount: { not: null } } : {}),
         },
         select: { id: true },

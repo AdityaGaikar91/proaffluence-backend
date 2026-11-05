@@ -2,10 +2,12 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { EmailCampaignStatus } from '@prisma/client';
 import { PrismaService } from '../core/prisma/prisma.service';
 import { MailService } from '../core/mail/mail.service';
+import { ReportingFreezeService } from '../core/reporting/reporting-freeze.service';
 import { ReportsService } from '../reports/reports.service';
 import { CampaignBatchActionDto } from './dto/communications.dto';
 
@@ -94,6 +96,7 @@ export class CommunicationsService {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly reportsService: ReportsService,
+    private readonly freezeService: ReportingFreezeService,
   ) {}
 
   private async ensureCampaignsSeeded(reportDate = DEFAULT_REPORT_DATE) {
@@ -106,6 +109,8 @@ export class CommunicationsService {
     });
 
     if (existingCount > 0) return;
+
+    const allowFakeStatuses = process.env.NODE_ENV !== 'production';
 
     for (let i = 0; i < groupHeads.length; i++) {
       const head = groupHeads[i];
@@ -120,43 +125,46 @@ export class CommunicationsService {
       let providerMessageId: string | null = null;
       let retryCount = 0;
 
-      if (head.id === 'abc' || head.id === 'sharma') {
-        status = EmailCampaignStatus.READY;
-      } else if (head.id === 'singhania') {
-        status = EmailCampaignStatus.APPROVED;
-        approvedByName = 'Priya S. (Manager)';
-        approvedAt = new Date('2026-09-28T16:00:00Z');
-      } else if (head.id === 'mehta') {
-        status = EmailCampaignStatus.SENT;
-        approvedByName = 'Priya S. (Manager)';
-        approvedAt = new Date('2026-09-28T16:00:00Z');
-        queuedAt = new Date('2026-09-30T09:15:00Z');
-        sentAt = new Date('2026-09-30T09:30:00Z');
-        providerMessageId = 'msg_ses_9921_mehta';
-      } else if (head.id === 'kapoor') {
-        status = EmailCampaignStatus.QUEUED;
-        approvedByName = 'Priya S. (Manager)';
-        approvedAt = new Date('2026-09-28T16:00:00Z');
-        queuedAt = new Date('2026-09-30T09:15:00Z');
-        providerMessageId = 'msg_ses_9923_kapoor';
-      } else if (head.id === 'gupta') {
-        status = EmailCampaignStatus.FAILED;
-        approvedByName = 'Priya S. (Manager)';
-        approvedAt = new Date('2026-09-28T16:00:00Z');
-        queuedAt = new Date('2026-09-30T09:15:00Z');
-        failedAt = new Date('2026-09-30T09:31:00Z');
-        failureReason =
-          'SMTP socket timeout: Gateway unreachable after 15000ms';
-        retryCount = 1;
-      } else if (head.id === 'verma') {
-        status = EmailCampaignStatus.BOUNCED;
-        approvedByName = 'Priya S. (Manager)';
-        approvedAt = new Date('2026-09-28T16:00:00Z');
-        queuedAt = new Date('2026-09-30T09:15:00Z');
-        bounceCode =
-          '550 5.1.1 Host rejected: Recipient address rejected (User unknown)';
-        failureReason =
-          'Hard Bounce: Inactive client mailbox at destination domain';
+      // Fake pipeline statuses only outside production (UI demos)
+      if (allowFakeStatuses) {
+        if (head.id === 'abc' || head.id === 'sharma') {
+          status = EmailCampaignStatus.READY;
+        } else if (head.id === 'singhania') {
+          status = EmailCampaignStatus.APPROVED;
+          approvedByName = 'Priya S. (Manager)';
+          approvedAt = new Date('2026-09-28T16:00:00Z');
+        } else if (head.id === 'mehta') {
+          status = EmailCampaignStatus.SENT;
+          approvedByName = 'Priya S. (Manager)';
+          approvedAt = new Date('2026-09-28T16:00:00Z');
+          queuedAt = new Date('2026-09-30T09:15:00Z');
+          sentAt = new Date('2026-09-30T09:30:00Z');
+          providerMessageId = 'msg_ses_9921_mehta';
+        } else if (head.id === 'kapoor') {
+          status = EmailCampaignStatus.QUEUED;
+          approvedByName = 'Priya S. (Manager)';
+          approvedAt = new Date('2026-09-28T16:00:00Z');
+          queuedAt = new Date('2026-09-30T09:15:00Z');
+          providerMessageId = 'msg_ses_9923_kapoor';
+        } else if (head.id === 'gupta') {
+          status = EmailCampaignStatus.FAILED;
+          approvedByName = 'Priya S. (Manager)';
+          approvedAt = new Date('2026-09-28T16:00:00Z');
+          queuedAt = new Date('2026-09-30T09:15:00Z');
+          failedAt = new Date('2026-09-30T09:31:00Z');
+          failureReason =
+            'SMTP socket timeout: Gateway unreachable after 15000ms';
+          retryCount = 1;
+        } else if (head.id === 'verma') {
+          status = EmailCampaignStatus.BOUNCED;
+          approvedByName = 'Priya S. (Manager)';
+          approvedAt = new Date('2026-09-28T16:00:00Z');
+          queuedAt = new Date('2026-09-30T09:15:00Z');
+          bounceCode =
+            '550 5.1.1 Host rejected: Recipient address rejected (User unknown)';
+          failureReason =
+            'Hard Bounce: Inactive client mailbox at destination domain';
+        }
       }
 
       const campaign = await this.prisma.emailCampaign.upsert({
@@ -184,10 +192,11 @@ export class CommunicationsService {
       });
 
       if (
-        status === EmailCampaignStatus.SENT ||
-        status === EmailCampaignStatus.QUEUED ||
-        status === EmailCampaignStatus.FAILED ||
-        status === EmailCampaignStatus.BOUNCED
+        allowFakeStatuses &&
+        (status === EmailCampaignStatus.SENT ||
+          status === EmailCampaignStatus.QUEUED ||
+          status === EmailCampaignStatus.FAILED ||
+          status === EmailCampaignStatus.BOUNCED)
       ) {
         const safeName = head.name.replace(/\s+/g, '_');
         await this.prisma.deliveryLog.create({
@@ -443,6 +452,7 @@ export class CommunicationsService {
     user: { id: string; name: string },
   ) {
     const reportDate = dto.reportDate || DEFAULT_REPORT_DATE;
+    await this.freezeService.assertPeriodFrozenForDispatch(reportDate);
     await this.ensureCampaignsSeeded(reportDate);
 
     const uniqueIds = Array.from(new Set(dto.groupHeadIds));
@@ -492,12 +502,25 @@ export class CommunicationsService {
       const email = head.id === 'khan' ? '' : head.email;
       if (!email || !email.trim() || !email.includes('@')) continue;
 
-      // 1. Generate PAN-password-protected PDF attachment
-      const pdf = await this.reportsService.generateClientPdf({
-        groupHeadId: head.id,
-        period: reportDate,
-        encrypted: true,
-      });
+      // 1. Generate PAN-password-protected PDF (LibreOffice required — fail-closed)
+      let pdf: Awaited<ReturnType<ReportsService['generateClientPdf']>>;
+      try {
+        pdf = await this.reportsService.generateClientPdf({
+          groupHeadId: head.id,
+          period: reportDate,
+          encrypted: true,
+        });
+      } catch (err: any) {
+        throw new ServiceUnavailableException(
+          err?.message ||
+            `PDF generation failed for ${head.name}; client email not dispatched.`,
+        );
+      }
+      if (pdf.engine !== 'libreoffice' || pdf.needsReview) {
+        throw new ServiceUnavailableException(
+          `Refusing to dispatch ${head.name}: PDF engine is ${pdf.engine} (LibreOffice required for client send).`,
+        );
+      }
 
       const safeName = head.name.replace(/\s+/g, '_');
       const attachmentFilename = `FY_Annual_Dashboard_${safeName}_${reportDate}.pdf`;
@@ -513,19 +536,61 @@ export class CommunicationsService {
         attachmentFilename,
       });
 
-      // 2. Dispatch via Nodemailer (or dev simulation fallback)
-      const mailResult = await this.mailService.sendMail({
-        to: email,
-        subject,
-        html,
-        attachments: [
-          {
-            filename: attachmentFilename,
-            content: pdf.buffer,
-            contentType: 'application/pdf',
-          },
-        ],
+      // Claim APPROVED → QUEUED before SMTP to reduce double-send races
+      const claimed = await this.prisma.emailCampaign.updateMany({
+        where: {
+          id: c.id,
+          status: EmailCampaignStatus.APPROVED,
+        },
+        data: {
+          status: EmailCampaignStatus.QUEUED,
+          queuedAt: new Date(),
+        },
       });
+      if (claimed.count === 0) {
+        continue;
+      }
+
+      // 2. Dispatch via Nodemailer (or dev simulation fallback)
+      let mailResult: Awaited<ReturnType<MailService['sendMail']>>;
+      try {
+        mailResult = await this.mailService.sendMail({
+          to: email,
+          subject,
+          html,
+          attachments: [
+            {
+              filename: attachmentFilename,
+              content: pdf.buffer,
+              contentType: 'application/pdf',
+            },
+          ],
+        });
+      } catch (err: any) {
+        await this.prisma.emailCampaign.update({
+          where: { id: c.id },
+          data: {
+            status: EmailCampaignStatus.FAILED,
+            failedAt: new Date(),
+            failureReason: err?.message || 'SMTP send failed',
+            retryCount: c.retryCount + 1,
+          },
+        });
+        await this.prisma.deliveryLog.create({
+          data: {
+            campaignId: c.id,
+            groupHeadId: head.id,
+            clientName: head.name,
+            recipientEmail: email,
+            attachmentFilename,
+            status: EmailCampaignStatus.FAILED,
+            provider: 'Nodemailer (SMTP Relay)',
+            failureReason: err?.message || 'SMTP send failed',
+            retryCount: c.retryCount + 1,
+          },
+        });
+        continue;
+      }
 
       const now = new Date();
       await this.prisma.emailCampaign.update({
@@ -571,17 +636,90 @@ export class CommunicationsService {
   async retryFailedLog(logId: string, alternateEmail?: string) {
     const log = await this.prisma.deliveryLog.findUnique({
       where: { id: logId },
-      include: { campaign: { include: { groupHead: true } } },
+      include: {
+        campaign: {
+          include: { groupHead: { include: { familyMembers: true } } },
+        },
+      },
     });
 
     if (!log) {
       throw new NotFoundException(`Delivery log ${logId} not found.`);
     }
 
-    const recipient = alternateEmail?.trim() || log.recipientEmail;
-    const msgId = `msg_retry_${Date.now()}_${log.groupHeadId}`;
-    const now = new Date();
+    const reportDate = log.campaign.reportDate;
+    await this.freezeService.assertPeriodFrozenForDispatch(reportDate);
 
+    const head = log.campaign.groupHead;
+    const recipient = alternateEmail?.trim() || log.recipientEmail;
+    if (!recipient || !recipient.includes('@')) {
+      throw new BadRequestException('Valid recipient email is required to retry.');
+    }
+
+    const pdf = await this.reportsService.generateClientPdf({
+      groupHeadId: head.id,
+      period: reportDate,
+      encrypted: true,
+    });
+    if (pdf.engine !== 'libreoffice' || pdf.needsReview) {
+      throw new ServiceUnavailableException(
+        `Retry blocked: PDF engine is ${pdf.engine} (LibreOffice required).`,
+      );
+    }
+
+    const safeName = head.name.replace(/\s+/g, '_');
+    const attachmentFilename =
+      log.attachmentFilename ||
+      `FY_Annual_Dashboard_${safeName}_${reportDate}.pdf`;
+    const subject = `ProAffluence FY Annual Dashboard — ${head.name} — as on ${reportDate}`;
+    const salutationName =
+      head.familyMembers[0]?.name || head.contactPerson || head.name;
+    const html = buildBrandedHtmlEmail({
+      salutationName,
+      groupHeadName: head.name,
+      financialYearLabel: 'FY 2026-27',
+      reportDate,
+      attachmentFilename,
+    });
+
+    let mailResult: Awaited<ReturnType<MailService['sendMail']>>;
+    try {
+      mailResult = await this.mailService.sendMail({
+        to: recipient,
+        subject,
+        html,
+        attachments: [
+          {
+            filename: attachmentFilename,
+            content: pdf.buffer,
+            contentType: 'application/pdf',
+          },
+        ],
+      });
+    } catch (err: any) {
+      const reason = err?.message || 'SMTP retry failed';
+      await this.prisma.deliveryLog.update({
+        where: { id: log.id },
+        data: {
+          recipientEmail: recipient,
+          status: EmailCampaignStatus.FAILED,
+          failureReason: reason,
+          retryCount: log.retryCount + 1,
+        },
+      });
+      await this.prisma.emailCampaign.update({
+        where: { id: log.campaignId },
+        data: {
+          status: EmailCampaignStatus.FAILED,
+          failedAt: new Date(),
+          failureReason: reason,
+          retryCount: log.campaign.retryCount + 1,
+        },
+      });
+      throw err;
+    }
+
+    const now = new Date();
     await this.prisma.deliveryLog.update({
       where: { id: log.id },
       data: {
@@ -590,7 +728,7 @@ export class CommunicationsService {
         timestamp: now,
         failureReason: null,
         bounceCode: null,
-        providerMessageId: msgId,
+        providerMessageId: mailResult.messageId,
         retryCount: log.retryCount + 1,
       },
     });
@@ -602,7 +740,7 @@ export class CommunicationsService {
         sentAt: now,
         failureReason: null,
         bounceCode: null,
-        providerMessageId: msgId,
+        providerMessageId: mailResult.messageId,
         retryCount: log.campaign.retryCount + 1,
       },
     });
@@ -611,7 +749,7 @@ export class CommunicationsService {
       retried: true,
       logId: log.id,
       status: 'Sent',
-      overview: await this.listCampaignsAndOverview(log.campaign.reportDate),
+      overview: await this.listCampaignsAndOverview(reportDate),
     };
   }
 }

@@ -506,7 +506,8 @@ export class GroupHeadsService {
   }
 
   /**
-   * Delete Group Head. Rejects deletion if linked cashflows or closing balances exist.
+   * Soft-delete Group Head: never hard-delete after ledger activity.
+   * Always inactivates; hard delete only when zero cashflows/balances (legacy empty shells).
    */
   async remove(id: string, currentUser?: { id: string; name?: string }) {
     const actorName = currentUser?.name || 'Manager';
@@ -531,13 +532,29 @@ export class GroupHeadsService {
         );
       }
 
-      if (
-        existing._count.cashflows > 0 ||
-        existing._count.closingBalances > 0
-      ) {
-        throw new BadRequestException(
-          `Cannot delete Group Head "${existing.name}". It has ${existing._count.cashflows} cashflow entries and ${existing._count.closingBalances} closing balance records. Inactivate the record instead by changing status to "Inactive".`,
-        );
+      const hasLedger =
+        existing._count.cashflows > 0 || existing._count.closingBalances > 0;
+
+      if (hasLedger || existing.status === 'Active') {
+        await tx.groupHead.update({
+          where: { id },
+          data: { status: 'Inactive' },
+        });
+        if (actorId) {
+          await tx.auditTrail.create({
+            data: {
+              action: AuditAction.VOIDED,
+              userId: actorId,
+              userName: actorName,
+              reason: `Soft-deleted (Inactive) mandate "${existing.name}" (${existing.customId}). Hard delete blocked${hasLedger ? ' due to ledger history' : ''}.`,
+            },
+          });
+        }
+        return {
+          success: true,
+          softDeleted: true,
+          message: `Group Head "${existing.name}" was inactivated (soft delete).`,
+        };
       }
 
       await tx.groupHead.delete({
@@ -550,13 +567,14 @@ export class GroupHeadsService {
             action: AuditAction.VOIDED,
             userId: actorId,
             userName: actorName,
-            reason: `Deleted mandate "${existing.name}" (${existing.customId}).`,
+            reason: `Deleted empty mandate shell "${existing.name}" (${existing.customId}).`,
           },
         });
       }
 
       return {
         success: true,
+        softDeleted: false,
         message: `Group Head "${existing.name}" was successfully deleted.`,
       };
     });

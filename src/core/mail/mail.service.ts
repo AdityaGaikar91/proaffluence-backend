@@ -66,7 +66,10 @@ export class MailService {
           html,
           attachments,
         });
-        this.logger.log(`Email successfully sent to ${to} [${subject}]`);
+        const safeTo = this.redactEmail(to);
+        this.logger.log(
+          `Email successfully sent to ${safeTo} messageId=${info?.messageId || generatedMsgId}`,
+        );
         return {
           sent: true,
           method: 'smtp',
@@ -74,32 +77,37 @@ export class MailService {
         };
       } catch (error: any) {
         this.logger.error(
-          `Failed to send email to ${to}: ${error.message}`,
+          `Failed to send email to ${this.redactEmail(to)}: ${error.message}`,
           error.stack,
         );
         throw error;
       }
     }
 
-    // Development Console Output
-    this.logger.log(
-      `\n=======================================================`,
-    );
-    this.logger.log(`[DEV EMAIL SIMULATION]`);
-    this.logger.log(`TO:          ${to}`);
-    this.logger.log(`FROM:        ${this.defaultFrom}`);
-    this.logger.log(`SUBJECT:     ${subject}`);
+    // Development Console Output — never dump full HTML body in production
+    const isProd = process.env.NODE_ENV === 'production';
+    this.logger.log(`[DEV EMAIL SIMULATION] to=${this.redactEmail(to)} subject=${subject}`);
     if (attachments && attachments.length > 0) {
       this.logger.log(
         `ATTACHMENTS: ${attachments.map((a) => `${a.filename} (${a.content.length} bytes)`).join(', ')}`,
       );
     }
-    this.logger.log(`BODY:\n${text || html}`);
-    this.logger.log(
-      `=======================================================\n`,
-    );
+    if (!isProd && text) {
+      this.logger.debug(`BODY_TEXT_LEN=${text.length}`);
+    }
 
     return { sent: true, method: 'console', messageId: generatedMsgId };
+  }
+
+  /** Log-safe email: keep domain, mask local-part. */
+  private redactEmail(email: string): string {
+    const at = email.indexOf('@');
+    if (at <= 0) return '***';
+    const local = email.slice(0, at);
+    const domain = email.slice(at + 1);
+    const maskedLocal =
+      local.length <= 2 ? '**' : `${local[0]}***${local[local.length - 1]}`;
+    return `${maskedLocal}@${domain}`;
   }
 
   async sendPasswordResetEmail(to: string, resetUrl: string): Promise<void> {

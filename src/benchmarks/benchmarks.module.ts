@@ -7,12 +7,14 @@ import { INDEX_FEED_PROVIDERS } from './providers/index-feed.types';
 import { NseArchivesProvider } from './providers/nse-archives.provider';
 import { NiftyIndicesTriProvider } from './providers/niftyindices-tri.provider';
 import { BseIndiaProvider } from './providers/unavailable.providers';
+import { BenchmarkCronService } from './benchmark-cron.service';
 
 @Module({
   imports: [PrismaModule, AuthModule],
   controllers: [BenchmarksController],
   providers: [
     BenchmarksService,
+    BenchmarkCronService,
     {
       provide: INDEX_FEED_PROVIDERS,
       useFactory: () => [

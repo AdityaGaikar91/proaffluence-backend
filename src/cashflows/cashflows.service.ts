@@ -5,6 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../core/prisma/prisma.service';
+import { ReportingFreezeService } from '../core/reporting/reporting-freeze.service';
 import { CreateCashflowDto } from './dto/create-cashflow.dto';
 import { UpdateCashflowDto } from './dto/update-cashflow.dto';
 import { VoidCashflowDto } from './dto/void-cashflow.dto';
@@ -50,7 +51,10 @@ function deriveMonthFromDate(dateStr: string): string {
 
 @Injectable()
 export class CashflowsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly freezeService: ReportingFreezeService,
+  ) {}
 
   /**
    * Next global Sr_No for the Add Trade Entry preview (max existing + 1).
@@ -71,6 +75,7 @@ export class CashflowsService {
     currentUser: { id: string; name?: string; role?: string },
   ) {
     const actorName = currentUser.name || 'Staff User';
+    await this.freezeService.assertMonthKeyNotFrozen(dto.Transaction_Date);
 
     return this.prisma.$transaction(async (tx) => {
       // 1. Resolve Group Head
@@ -319,6 +324,9 @@ export class CashflowsService {
     if (existing.voided) {
       throw new BadRequestException('Cannot correct a voided cashflow entry.');
     }
+    await this.freezeService.assertMonthKeyNotFrozen(
+      dto.Transaction_Date || existing.transactionDate,
+    );
 
     const actorName = currentUser.name || 'Staff User';
 
@@ -492,6 +500,7 @@ export class CashflowsService {
     if (existing.voided) {
       throw new BadRequestException('Entry is already voided.');
     }
+    await this.freezeService.assertMonthKeyNotFrozen(existing.transactionDate);
 
     const actorName = currentUser.name || 'Manager User';
 
@@ -529,6 +538,11 @@ export class CashflowsService {
     if (existing.approvalStatus === ApprovalStatus.APPROVED) {
       throw new BadRequestException('Cashflow entry is already approved.');
     }
+    this.freezeService.assertNotSelfApprove(
+      existing.submittedById,
+      currentUser.id,
+    );
+    await this.freezeService.assertMonthKeyNotFrozen(existing.transactionDate);
 
     const actorName = currentUser.name || 'Manager';
 
@@ -586,6 +600,7 @@ export class CashflowsService {
         'Only pending cashflows can be returned for correction.',
       );
     }
+    await this.freezeService.assertMonthKeyNotFrozen(existing.transactionDate);
 
     const actorName = currentUser.name || 'Manager';
     const cleanReason = dto.reason.trim();
@@ -630,11 +645,16 @@ export class CashflowsService {
           id: { in: uniqueIds },
           voided: false,
           approvalStatus: ApprovalStatus.PENDING,
+          NOT: { submittedById: currentUser.id },
         },
-        select: { id: true },
+        select: { id: true, transactionDate: true },
       });
 
-      const eligibleIds = eligibleRecords.map((r) => r.id);
+      const eligibleIds: string[] = [];
+      for (const r of eligibleRecords) {
+        await this.freezeService.assertMonthKeyNotFrozen(r.transactionDate);
+        eligibleIds.push(r.id);
+      }
 
       if (eligibleIds.length === 0) {
         return { approvedCount: 0 };
@@ -690,10 +710,14 @@ export class CashflowsService {
           voided: false,
           approvalStatus: ApprovalStatus.PENDING,
         },
-        select: { id: true },
+        select: { id: true, transactionDate: true },
       });
 
-      const eligibleIds = eligibleRecords.map((r) => r.id);
+      const eligibleIds: string[] = [];
+      for (const r of eligibleRecords) {
+        await this.freezeService.assertMonthKeyNotFrozen(r.transactionDate);
+        eligibleIds.push(r.id);
+      }
 
       if (eligibleIds.length === 0) {
         return { returnedCount: 0 };
