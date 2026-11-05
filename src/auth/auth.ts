@@ -30,10 +30,25 @@ const sameSite =
 
 const ac = createAccessControl({});
 
+const betterAuthSecret = process.env.BETTER_AUTH_SECRET;
+if (isProduction) {
+  if (!betterAuthSecret || betterAuthSecret.length < 32) {
+    throw new Error(
+      'BETTER_AUTH_SECRET must be set to at least 32 characters in production',
+    );
+  }
+  if (betterAuthSecret === '01234567890123456789012345678901') {
+    throw new Error('BETTER_AUTH_SECRET must not use the insecure default value');
+  }
+}
+
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || 'http://localhost:8002',
   basePath: '/api/auth',
-  secret: process.env.BETTER_AUTH_SECRET || '01234567890123456789012345678901',
+  secret:
+    betterAuthSecret ||
+    // Dev/test only — production boot fails above if unset
+    '01234567890123456789012345678901',
   database: prismaAdapter(prisma, {
     provider: 'postgresql',
   }),
@@ -71,6 +86,8 @@ export const auth = betterAuth({
   trustedOrigins,
   rateLimit: {
     enabled: true,
+    // Persist across instances via Prisma RateLimit model (not in-memory)
+    storage: 'database',
     window: 60,
     max: 100,
     customRules: {

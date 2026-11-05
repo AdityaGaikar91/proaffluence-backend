@@ -25,6 +25,34 @@ model ReportingRun {
   updatedAt            DateTime     @updatedAt @map("updated_at")
 
   auditEntries         AuditTrail[] @relation("RunAudits")
+  artifacts            ReportArtifact[]
 
   @@map("reporting_runs")
+}
+
+/// Immutable calc/PDF snapshot for a group head + period (send attaches this PDF only).
+model ReportArtifact {
+  id                 String        @id @default(uuid())
+  groupHeadId        String        @map("group_head_id")
+  period             String
+  monthKey           String        @map("month_key")
+  reportingRunId     String?       @map("reporting_run_id")
+  reportingRun       ReportingRun? @relation(fields: [reportingRunId], references: [id], onDelete: SetNull)
+
+  inputFingerprint   String        @map("input_fingerprint")
+  calcJson           Json          @map("calc_json")
+  pdfPath            String?       @map("pdf_path")
+  pdfSha256          String?       @map("pdf_sha256")
+  engine             String        @default("unknown")
+  needsReview        Boolean       @default(false) @map("needs_review")
+  jobId              String?       @map("job_id")
+
+  createdAt          DateTime      @default(now()) @map("created_at")
+  createdById        String?       @map("created_by_id")
+  createdByName      String?       @map("created_by_name")
+
+  @@unique([groupHeadId, period, inputFingerprint])
+  @@index([groupHeadId, period])
+  @@index([period])
+  @@map("report_artifacts")
 }
