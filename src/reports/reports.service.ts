@@ -19,6 +19,7 @@ import {
   formatDdMmYyyy,
   normalizeAssetCategory,
   parseDdMmYyyy,
+  valuationMonthKeys,
 } from './financial-math.util';
 import {
   ExecuteCalculationRunDto,
@@ -778,6 +779,11 @@ export class ReportsService {
       inceptionDate: groupHead?.inceptionDate || fromPeriod,
       fromPeriod,
       toPeriod,
+      // Snapshot months of the selected mandate before category/family filters, so a
+      // category missing from a valuation month reads 0 instead of carrying forward.
+      valuationMonthKeys: groupHead
+        ? valuationMonthKeys(closingBalances)
+        : undefined,
       cashflows: mappedCfs,
       closingBalances: mappedCbs,
       hybridRules: hybridRules.map((r) => ({

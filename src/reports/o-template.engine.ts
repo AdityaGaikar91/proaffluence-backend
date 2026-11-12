@@ -8,8 +8,11 @@ import {
   calculateXirr,
   earliestClosingMonthKey,
   firstDayOfFyContainingMonthKey,
+  filterCashflowsOnOrBefore,
   formatDdMmYyyy,
   generateFiscalPeriods,
+  monthKeyFromDate,
+  nextDay,
   normalizeAssetCategory,
   parseDdMmYyyy,
   resolveReturnBy12MonthRule,
@@ -17,6 +20,7 @@ import {
   splitAssetAllocation,
   sumClosingBalancesAtPeriodEnd,
   sumOpeningClosingBeforeDate,
+  valuationMonthKeys,
 } from './financial-math.util';
 
 export interface FySummaryRowPayload {
@@ -450,6 +454,11 @@ export class OTemplateEngine {
     toPeriod: string;
     totalAum?: number;
     netInvestment?: number;
+    /**
+     * Valuation months (YYYY-MM) of the whole mandate before any category / family
+     * filter. Lets a filtered run read a category missing from a snapshot as 0.
+     */
+    valuationMonthKeys?: string[];
     cashflows: Array<{
       srNo: number;
       dateOfEntry: string;
@@ -499,8 +508,8 @@ export class OTemplateEngine {
       inceptionDate,
       fromPeriod,
       toPeriod,
-      cashflows,
-      closingBalances,
+      cashflows: inputCashflows,
+      closingBalances: inputClosingBalances,
       hybridRules,
       indexQuotes,
     } = params;
@@ -524,8 +533,8 @@ export class OTemplateEngine {
             toPeriod: toPeriod || '30-09-2026',
           },
         },
-        cashflows,
-        closingBalances,
+        inputCashflows,
+        inputClosingBalances,
         hybridRules,
       );
     }
@@ -535,7 +544,7 @@ export class OTemplateEngine {
       const base = this.scaleDashboard(ABC_REFERENCE_DASHBOARD, factor);
       const assetAllocation = this.computeAssetAllocationFromBalances(
         base.assetAllocation,
-        closingBalances,
+        inputClosingBalances,
         hybridRules,
       );
 
@@ -554,13 +563,29 @@ export class OTemplateEngine {
 
       return this.buildStagingFromDashboard(
         finalDashboard,
-        cashflows,
-        closingBalances,
+        inputCashflows,
+        inputClosingBalances,
         hybridRules,
       );
     }
 
     // Dynamic calculation from approved cashflows & closing balances (including "All")
+    const effectiveTo = toPeriod || '30-09-2026';
+    const reportEndKey = monthKeyFromDate(parseDdMmYyyy(effectiveTo));
+    // Only ledger rows on/before the report date may feed FY, SI or category maths
+    // (e.g. a trade dated after To Period must not leak into Since Inception).
+    const cashflows = filterCashflowsOnOrBefore(inputCashflows, effectiveTo);
+    const closingBalances = inputClosingBalances.filter((b) => {
+      const key = resolveRowMonthKey(b);
+      return key === null || key <= reportEndKey;
+    });
+    // Valuation snapshot months: a category absent from a snapshot reads 0 (Excel SUMIFS)
+    const snapshotMonthKeys = (
+      params.valuationMonthKeys && params.valuationMonthKeys.length > 0
+        ? Array.from(new Set(params.valuationMonthKeys)).sort()
+        : valuationMonthKeys(closingBalances)
+    ).filter((k) => k <= reportEndKey);
+
     const ledgerFrom =
       this.earliestLedgerDate(cashflows, closingBalances) || '01-04-2017';
     const candidates = [fromPeriod, inceptionDate, ledgerFrom].filter(
@@ -569,7 +594,6 @@ export class OTemplateEngine {
     const effectiveFrom = candidates
       .map((d) => ({ raw: d, t: parseDdMmYyyy(d).getTime() }))
       .sort((a, b) => a.t - b.t)[0].raw;
-    const effectiveTo = toPeriod || '30-09-2026';
 
     const periods = generateFiscalPeriods(effectiveFrom, effectiveTo);
 
@@ -613,8 +637,9 @@ export class OTemplateEngine {
       beforeDate: firstCfDate,
     });
     if (siOpening) {
+      // Excel From Period = first day after the opening valuation month (e.g. 01-04-2018)
       allDatedCashflows.unshift({
-        date: siOpening.asOfDate,
+        date: nextDay(siOpening.asOfDate),
         amount: -siOpening.amount,
       });
     }
@@ -638,6 +663,7 @@ export class OTemplateEngine {
       });
       const closing = sumClosingBalancesAtPeriodEnd({
         closingBalances,
+        snapshotMonthKeys,
         periodEnd: p.endDate,
         category: cat,
       });
@@ -723,8 +749,39 @@ export class OTemplateEngine {
 
       const closingVal = sumClosingBalancesAtPeriodEnd({
         closingBalances,
+        snapshotMonthKeys,
         periodEnd: p.endDate,
       });
+
+      // Excel parity: FYs before the mandate has any data are not printed. The FY
+      // whose only data is the opening valuation prints as a value line ("-" for
+      // New Investments / XIRR / Nifty) and is left out of the XIRR and allocation tables.
+      if (periodCfs.length === 0 && !hasPrevClosing) {
+        if (closingVal !== null) {
+          summaryRows.push({
+            financialYear: p.fyLabel,
+            valueAsOn3103: closingVal,
+            newInvestments: null,
+            xirr: null,
+            nifty50Tri: null,
+          });
+          prevClosing = closingVal;
+          hasPrevClosing = true;
+          for (const cat of ['MF', 'PMS', 'STOCKS'] as const) {
+            const catClose = sumClosingBalancesAtPeriodEnd({
+              closingBalances,
+              snapshotMonthKeys,
+              periodEnd: p.endDate,
+              category: cat,
+            });
+            if (catClose !== null) {
+              prevClosingByCat[cat] = catClose;
+              hasPrevByCat[cat] = true;
+            }
+          }
+        }
+        continue;
+      }
 
       const periodVector: Array<{ date: Date; amount: number }> = [];
       if (hasPrevClosing && prevClosing > 0) {
@@ -752,8 +809,20 @@ export class OTemplateEngine {
           redemptions,
           closingBalance: closingVal,
         });
+        // 12-month rule starts at the first trade when there is no opening value
+        // (e.g. a category-filtered run whose category starts mid-FY), as in Excel.
+        const ruleStart =
+          (hasPrevClosing && prevClosing > 0) || periodCfs.length === 0
+            ? p.startDate
+            : new Date(
+                Math.min(
+                  ...periodCfs.map((c) =>
+                    parseDdMmYyyy(c.transactionDate).getTime(),
+                  ),
+                ),
+              );
         resolvedValue = resolveReturnBy12MonthRule({
-          startDate: p.startDate,
+          startDate: ruleStart,
           endDate: p.endDate,
           xirrVal,
           arVal,
@@ -826,6 +895,7 @@ export class OTemplateEngine {
       for (const cat of ['MF', 'PMS', 'STOCKS'] as const) {
         const catClose = sumClosingBalancesAtPeriodEnd({
           closingBalances,
+          snapshotMonthKeys,
           periodEnd: p.endDate,
           category: cat,
         });
@@ -838,6 +908,7 @@ export class OTemplateEngine {
 
     const terminalClosing = sumClosingBalancesAtPeriodEnd({
       closingBalances,
+      snapshotMonthKeys,
       periodEnd: parseDdMmYyyy(effectiveTo),
     });
     if (terminalClosing !== null && terminalClosing > 0) {
@@ -847,7 +918,9 @@ export class OTemplateEngine {
       });
     }
 
-    const siXirr = calculateXirr(allDatedCashflows);
+    // No valuation on/before the report date → SI return is not computable (show "-")
+    const siXirr =
+      terminalClosing === null ? null : calculateXirr(allDatedCashflows);
     const siBench = calculateCashflowWeightedBenchmarkReturn({
       cashflows: allDatedCashflows.filter((c) => c.amount < 0),
       indexQuotes,
@@ -861,6 +934,7 @@ export class OTemplateEngine {
       'MF',
       effectiveFrom,
       effectiveTo,
+      snapshotMonthKeys,
     );
     const siPms = this.computeSinceInceptionCategoryReturn(
       cashflows,
@@ -868,6 +942,7 @@ export class OTemplateEngine {
       'PMS',
       effectiveFrom,
       effectiveTo,
+      snapshotMonthKeys,
     );
     const siStock = this.computeSinceInceptionCategoryReturn(
       cashflows,
@@ -875,6 +950,7 @@ export class OTemplateEngine {
       'STOCKS',
       effectiveFrom,
       effectiveTo,
+      snapshotMonthKeys,
     );
 
     const dynamicDashboard: FyDashboardResultPayload = {
@@ -977,6 +1053,7 @@ export class OTemplateEngine {
     category: string,
     fromPeriod: string,
     toPeriod: string,
+    snapshotMonthKeys?: string[],
   ): number | null {
     const catCfs = cashflows.filter(
       (cf) => normalizeAssetCategory(cf.category) === category,
@@ -985,6 +1062,7 @@ export class OTemplateEngine {
     const start = parseDdMmYyyy(fromPeriod);
     const closing = sumClosingBalancesAtPeriodEnd({
       closingBalances,
+      snapshotMonthKeys,
       periodEnd: end,
       category,
     });
@@ -1005,7 +1083,7 @@ export class OTemplateEngine {
       category,
     });
     if (opening) {
-      vector.push({ date: opening.asOfDate, amount: -opening.amount });
+      vector.push({ date: nextDay(opening.asOfDate), amount: -opening.amount });
     }
     for (const c of catCfs) {
       vector.push({
@@ -1033,7 +1111,7 @@ export class OTemplateEngine {
       closingBalance: closing,
     });
     return resolveReturnBy12MonthRule({
-      startDate: opening?.asOfDate ?? start,
+      startDate: opening ? nextDay(opening.asOfDate) : start,
       endDate: end,
       xirrVal,
       arVal,
