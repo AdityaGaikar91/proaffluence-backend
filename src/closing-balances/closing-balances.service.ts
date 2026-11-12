@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   Injectable,
   NotFoundException,
@@ -12,6 +13,8 @@ import { InitializeMonthDto } from './dto/initialize-month.dto';
 import { CreateClosingBalanceDto } from './dto/create-closing-balance.dto';
 import { ReturnBalanceDto } from './dto/return-balance.dto';
 import { ApproveMonthDto } from './dto/approve-month.dto';
+import { ImportClosingBalanceRowsDto } from './dto/import-closing-balance.dto';
+import { parseMonthKeyFromLabel } from './month-key.util';
 import {
   ApprovalStatus,
   AssetCategory,
@@ -217,6 +220,31 @@ export class ClosingBalancesService {
       },
       meta,
       pagination: meta, // Backward compatibility alias
+    };
+  }
+
+  /**
+   * Reporting cycles that hold closing balance rows (non-voided), oldest first.
+   * Lets the UI start its cycle picker at the earliest month in the data.
+   */
+  async getMonthRange(): Promise<{
+    earliestMonthKey: string | null;
+    latestMonthKey: string | null;
+    months: Array<{ monthKey: string; count: number }>;
+  }> {
+    const grouped = await this.prisma.closingBalance.groupBy({
+      by: ['monthKey'],
+      where: { voided: false },
+      _count: { _all: true },
+      orderBy: { monthKey: 'asc' },
+    });
+    const months = grouped
+      .filter((g) => isValidMonthKey(g.monthKey))
+      .map((g) => ({ monthKey: g.monthKey, count: g._count._all }));
+    return {
+      earliestMonthKey: months[0]?.monthKey ?? null,
+      latestMonthKey: months.at(-1)?.monthKey ?? null,
+      months,
     };
   }
 
@@ -1192,6 +1220,320 @@ export class ClosingBalancesService {
         missingCount,
         overridden: missingCount > 0 && Boolean(allowMissingOverride),
         message: `Successfully approved ${pendingIds.length} closing balance record(s) for ${monthLabelFromKey(monthKey)}.`,
+      };
+    });
+  }
+
+  /**
+   * Batch import closing balance rows from spreadsheet upload or Excel paste.
+   * Each row is filed under its own reporting cycle: Closing_Balance_date, else the
+   * Month label (e.g. "Mar-18"), else the selected `dto.monthKey` fallback.
+   * Skips natural-key duplicates within the same cycle (does not sum).
+   * Unknown Group Heads, unreadable months and frozen cycles become row errors.
+   */
+  async batchImport(
+    dto: ImportClosingBalanceRowsDto,
+    currentUser: { id: string; name?: string; role?: string },
+  ): Promise<{
+    count: number;
+    skippedCount: number;
+    importedIds: string[];
+    errors: Array<{ rowIndex: number; message: string }>;
+    srNoRange: { start: number; end: number } | null;
+  }> {
+    const fallbackMonthKey = dto.monthKey?.trim();
+    if (!isValidMonthKey(fallbackMonthKey)) {
+      throw new BadRequestException(
+        `Invalid monthKey "${fallbackMonthKey}". Expected YYYY-MM format with valid month (01-12).`,
+      );
+    }
+
+    const rows = dto.rows ?? [];
+    if (rows.length === 0) {
+      return {
+        count: 0,
+        skippedCount: 0,
+        importedIds: [],
+        errors: [],
+        srNoRange: null,
+      };
+    }
+
+    const errors: Array<{ rowIndex: number; message: string }> = [];
+
+    // Resolve each row's own reporting cycle before opening the transaction.
+    const rowMonthKeys: Array<string | null> = rows.map((row, i) => {
+      const cbDate = row.Closing_Balance_date?.trim();
+      if (cbDate) {
+        if (!isValidDateDdMmYyyy(cbDate)) {
+          errors.push({
+            rowIndex: i + 1,
+            message: `Invalid Closing_Balance_date "${cbDate}". Expected dd-MM-yyyy.`,
+          });
+          return null;
+        }
+        return deriveMonthKeyFromDate(cbDate);
+      }
+      const label = row.Month?.trim();
+      if (label) {
+        const parsed = parseMonthKeyFromLabel(label);
+        if (!parsed) {
+          errors.push({
+            rowIndex: i + 1,
+            message: `Unrecognised Month "${label}". Use e.g. "Mar-18", "March 2018" or "2018-03".`,
+          });
+        }
+        return parsed;
+      }
+      return fallbackMonthKey;
+    });
+
+    const distinctMonthKeys = Array.from(
+      new Set(rowMonthKeys.filter((k): k is string => Boolean(k))),
+    );
+    const frozenMonthKeys = new Set<string>();
+    for (const mk of distinctMonthKeys) {
+      if (await this.freezeService.isMonthKeyFrozen(mk)) {
+        frozenMonthKeys.add(mk);
+      }
+    }
+
+    const actorName = currentUser.name || 'Staff User';
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(74618294);`;
+
+      const distinctHeadNames = Array.from(
+        new Set(rows.map((r) => r.Group_Head_Name.trim().toLowerCase())),
+      );
+
+      const groupHeads = await tx.groupHead.findMany({
+        where: {
+          OR: distinctHeadNames.map((name) => ({
+            name: { equals: name, mode: 'insensitive' },
+          })),
+        },
+        include: { familyMembers: true },
+      });
+
+      const headMap = new Map<string, (typeof groupHeads)[0]>();
+      for (const gh of groupHeads) {
+        headMap.set(gh.name.trim().toLowerCase(), gh);
+      }
+
+      const memberCache = new Map<string, Map<string, string>>();
+      for (const gh of groupHeads) {
+        const memMap = new Map<string, string>();
+        for (const m of gh.familyMembers) {
+          memMap.set(m.name.trim().toLowerCase(), m.id);
+        }
+        memberCache.set(gh.id, memMap);
+      }
+
+      const existing = await tx.closingBalance.findMany({
+        where: { monthKey: { in: distinctMonthKeys } },
+        select: {
+          monthKey: true,
+          groupHeadId: true,
+          familyMemberName: true,
+          category: true,
+          subCategory: true,
+        },
+      });
+
+      const occupiedKeys = new Set(
+        existing.map(
+          (e) =>
+            `${e.monthKey}::${e.groupHeadId}::${e.familyMemberName.toLowerCase()}::${e.category}::${e.subCategory.toLowerCase()}`,
+        ),
+      );
+
+      type PreparedRow = {
+        rowIndex: number;
+        groupHeadId: string;
+        groupHeadName: string;
+        familyMemberName: string;
+        familyMemberId: string | null;
+        category: AssetCategory;
+        subCategory: string;
+        closingAmount: number | null;
+        dateOfEntry: string;
+        userId: string;
+        monthKey: string;
+        monthLabel: string;
+        key: string;
+      };
+
+      const prepared: PreparedRow[] = [];
+      const batchKeys = new Set<string>();
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rowIndex = i + 1;
+        const monthKey = rowMonthKeys[i];
+        if (!monthKey) continue; // month error already recorded
+        if (frozenMonthKeys.has(monthKey)) {
+          errors.push({
+            rowIndex,
+            message: `Reporting cycle ${monthKey} is frozen; row not imported.`,
+          });
+          continue;
+        }
+        const ghName = row.Group_Head_Name.trim();
+        const memName = row.Family_Member_Name.trim();
+        const subCategory = row.Sub_Category.trim();
+        const gh = headMap.get(ghName.toLowerCase());
+
+        if (!gh) {
+          errors.push({
+            rowIndex,
+            message: `Group Head "${ghName}" not found in registered directory.`,
+          });
+          continue;
+        }
+
+        if (row.Date_Of_Entry && !isValidDateDdMmYyyy(row.Date_Of_Entry)) {
+          errors.push({
+            rowIndex,
+            message: `Invalid Date_Of_Entry "${row.Date_Of_Entry}".`,
+          });
+          continue;
+        }
+
+        if (
+          row.Closing_Amount !== undefined &&
+          row.Closing_Amount !== null &&
+          (typeof row.Closing_Amount !== 'number' ||
+            !Number.isFinite(row.Closing_Amount) ||
+            row.Closing_Amount < 0)
+        ) {
+          errors.push({
+            rowIndex,
+            message: 'Closing_Amount must be a non-negative number.',
+          });
+          continue;
+        }
+
+        const key = `${monthKey}::${gh.id}::${memName.toLowerCase()}::${row.Category}::${subCategory.toLowerCase()}`;
+
+        if (occupiedKeys.has(key) || batchKeys.has(key)) {
+          errors.push({
+            rowIndex,
+            message: `Duplicate row for ${gh.name} / ${memName} / ${row.Category} / ${subCategory} in ${monthKey}.`,
+          });
+          continue;
+        }
+
+        batchKeys.add(key);
+
+        let memMap = memberCache.get(gh.id)!;
+        const memLower = memName.toLowerCase();
+        if (!memMap.has(memLower)) {
+          const newMember = await tx.familyMember.create({
+            data: { groupHeadId: gh.id, name: memName },
+          });
+          memMap.set(memLower, newMember.id);
+        }
+
+        prepared.push({
+          rowIndex,
+          groupHeadId: gh.id,
+          groupHeadName: gh.name,
+          familyMemberName: memName,
+          familyMemberId: memMap.get(memLower) ?? null,
+          category: row.Category,
+          subCategory,
+          closingAmount:
+            row.Closing_Amount === undefined || row.Closing_Amount === null
+              ? null
+              : row.Closing_Amount,
+          dateOfEntry: row.Date_Of_Entry || defaultDateForMonthKey(monthKey),
+          userId: row.User_Id?.trim() || gh.pan || currentUser.id,
+          monthKey,
+          monthLabel: row.Month?.trim() || monthLabelFromKey(monthKey),
+          key,
+        });
+      }
+
+      if (prepared.length === 0) {
+        return {
+          count: 0,
+          skippedCount: errors.length,
+          importedIds: [],
+          errors,
+          srNoRange: null,
+        };
+      }
+
+      const lastRecord = await tx.closingBalance.findFirst({
+        orderBy: { srNo: 'desc' },
+        select: { srNo: true },
+      });
+      const startSrNo = (lastRecord?.srNo ?? 0) + 1;
+      const endSrNo = startSrNo + prepared.length - 1;
+
+      const balanceData: Prisma.ClosingBalanceCreateManyInput[] = [];
+      const auditData: Prisma.AuditTrailCreateManyInput[] = [];
+      const importedIds: string[] = [];
+
+      for (let i = 0; i < prepared.length; i++) {
+        const row = prepared[i];
+        const entityId = randomUUID();
+        importedIds.push(entityId);
+        const assignedSrNo = startSrNo + i;
+
+        balanceData.push({
+          id: entityId,
+          srNo: assignedSrNo,
+          dateOfEntry: row.dateOfEntry,
+          userId: row.userId,
+          monthKey: row.monthKey,
+          month: row.monthLabel,
+          groupHeadId: row.groupHeadId,
+          groupHeadName: row.groupHeadName,
+          familyMemberId: row.familyMemberId,
+          familyMemberName: row.familyMemberName,
+          category: row.category,
+          subCategory: row.subCategory,
+          closingAmount:
+            row.closingAmount === null
+              ? null
+              : new Prisma.Decimal(row.closingAmount),
+          approvalStatus: ApprovalStatus.PENDING,
+          voided: false,
+          submittedById: currentUser.id,
+          submittedByName: actorName,
+          submittedAt: now,
+        });
+
+        auditData.push({
+          id: randomUUID(),
+          action: AuditAction.IMPORTED,
+          userId: currentUser.id,
+          userName: actorName,
+          reason: 'Bulk closing balance import via spreadsheet.',
+          balanceId: entityId,
+          changes: {
+            Sr_No: assignedSrNo,
+            Closing_Amount: row.closingAmount,
+            Category: row.category,
+            Sub_Category: row.subCategory,
+            monthKey: row.monthKey,
+          },
+          timestamp: now,
+        });
+      }
+
+      await tx.closingBalance.createMany({ data: balanceData });
+      await tx.auditTrail.createMany({ data: auditData });
+
+      return {
+        count: prepared.length,
+        skippedCount: errors.length,
+        importedIds,
+        errors,
+        srNoRange: { start: startSrNo, end: endSrNo },
       };
     });
   }

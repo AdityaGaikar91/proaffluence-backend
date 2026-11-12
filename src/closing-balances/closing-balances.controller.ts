@@ -25,6 +25,7 @@ import { CreateClosingBalanceDto } from './dto/create-closing-balance.dto';
 import { ReturnBalanceDto } from './dto/return-balance.dto';
 import { BulkBalanceActionDto } from './dto/bulk-balance-action.dto';
 import { ApproveMonthDto } from './dto/approve-month.dto';
+import { ImportClosingBalanceRowsDto } from './dto/import-closing-balance.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -59,6 +60,16 @@ export class ClosingBalancesController {
   @ApiResponse({ status: 200, description: 'Summary statistics payload.' })
   async getSummary(@Query('monthKey') monthKey: string) {
     return this.closingBalancesService.getSummary(monthKey);
+  }
+
+  @Get('months')
+  @ApiOperation({
+    summary:
+      'List reporting cycles (monthKey) that hold closing balances, with earliest/latest',
+  })
+  @ApiResponse({ status: 200, description: 'Distinct cycles, oldest first.' })
+  async getMonthRange() {
+    return this.closingBalancesService.getMonthRange();
   }
 
   @Post('initialize-month')
@@ -101,6 +112,28 @@ export class ClosingBalancesController {
     @CurrentUser() user: { id: string; name?: string; role?: string },
   ) {
     return this.closingBalancesService.create(dto, user);
+  }
+
+  @Post('import')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      'Batch import closing balance rows from spreadsheet or clipboard paste',
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Returns imported count, skipped/errors for duplicates or unknown Group Heads, and Sr_No range.',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Reporting month is frozen.',
+  })
+  async batchImport(
+    @Body() dto: ImportClosingBalanceRowsDto,
+    @CurrentUser() user: { id: string; name?: string; role?: string },
+  ) {
+    return this.closingBalancesService.batchImport(dto, user);
   }
 
   @Post('approve-month')
