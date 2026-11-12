@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   Injectable,
   NotFoundException,
@@ -11,6 +12,7 @@ import { UpdateCashflowDto } from './dto/update-cashflow.dto';
 import { VoidCashflowDto } from './dto/void-cashflow.dto';
 import { ReturnCashflowDto } from './dto/return-cashflow.dto';
 import { QueryCashflowDto } from './dto/query-cashflow.dto';
+import { ImportCashflowRowsDto } from './dto/import-cashflow.dto';
 import {
   ApprovalStatus,
   AssetCategory,
@@ -745,5 +747,202 @@ export class CashflowsService {
 
       return { returnedCount: eligibleIds.length };
     });
+  }
+
+  /**
+   * Batch import trade cashflow entries from spreadsheet upload or direct Excel clipboard paste.
+   * Runs in an atomic ACID transaction with a PostgreSQL advisory lock for race-free sequential Sr_No assignment.
+   */
+  async batchImport(
+    dto: ImportCashflowRowsDto,
+    currentUser: { id: string; name?: string; role?: string },
+  ): Promise<{
+    count: number;
+    importedIds: string[];
+    srNoRange: { start: number; end: number };
+  }> {
+    const { rows } = dto;
+    if (!rows || rows.length === 0) {
+      return { count: 0, importedIds: [], srNoRange: { start: 0, end: 0 } };
+    }
+
+    const actorName = currentUser.name || 'Staff User';
+    const now = new Date();
+    const todayStr = `${String(now.getDate()).padStart(2, '0')}-${String(
+      now.getMonth() + 1,
+    ).padStart(2, '0')}-${now.getFullYear()}`;
+
+    // 1. Multi-Month Freeze Validation (Pre-Transaction Gate)
+    const uniqueMonthKeys = Array.from(
+      new Set(
+        rows.map((r) =>
+          ReportingFreezeService.deriveMonthKey(r.Transaction_Date),
+        ),
+      ),
+    );
+    for (const monthKey of uniqueMonthKeys) {
+      await this.freezeService.assertMonthKeyNotFrozen(monthKey);
+    }
+
+    // 2. High-Performance ACID Transaction
+    return this.prisma.$transaction(
+      async (tx) => {
+        // A. Prevent concurrency sequence collisions via Postgres Advisory Lock
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(74618293);`;
+
+        // B. Batch Lookup Group Heads (Single SQL Query)
+        const distinctHeadNames = Array.from(
+          new Set(rows.map((r) => r.Group_Head_Name.trim().toLowerCase())),
+        );
+
+        const groupHeads = await tx.groupHead.findMany({
+          where: {
+            OR: distinctHeadNames.map((name) => ({
+              name: { equals: name, mode: 'insensitive' },
+            })),
+          },
+          include: { familyMembers: true },
+        });
+
+        // Build Case-Insensitive O(1) Lookup Map
+        const headMap = new Map<string, (typeof groupHeads)[0]>();
+        for (const gh of groupHeads) {
+          headMap.set(gh.name.trim().toLowerCase(), gh);
+        }
+
+        // Validate all Group Heads exist
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          const matched = headMap.get(row.Group_Head_Name.trim().toLowerCase());
+          if (!matched) {
+            throw new BadRequestException(
+              `Row ${i + 1}: Group Head "${row.Group_Head_Name}" not found in registered directory.`,
+            );
+          }
+        }
+
+        // C. Batch Resolve or Auto-Create Family Members
+        const memberCache = new Map<string, Map<string, string>>();
+        for (const gh of groupHeads) {
+          const memMap = new Map<string, string>();
+          for (const m of gh.familyMembers) {
+            memMap.set(m.name.trim().toLowerCase(), m.id);
+          }
+          memberCache.set(gh.id, memMap);
+        }
+
+        // Auto-create missing family members on demand
+        for (const row of rows) {
+          const gh = headMap.get(row.Group_Head_Name.trim().toLowerCase())!;
+          const memMap = memberCache.get(gh.id)!;
+          const cleanMemName = row.Family_Member_Name.trim();
+          const memLower = cleanMemName.toLowerCase();
+
+          if (cleanMemName && !memMap.has(memLower)) {
+            const newMember = await tx.familyMember.create({
+              data: {
+                groupHeadId: gh.id,
+                name: cleanMemName,
+              },
+            });
+            memMap.set(memLower, newMember.id);
+          }
+        }
+
+        // D. Calculate Contiguous Sr_No Range Block
+        const lastRecord = await tx.masterCashflow.findFirst({
+          orderBy: { srNo: 'desc' },
+          select: { srNo: true },
+        });
+        const startSrNo = (lastRecord?.srNo ?? 0) + 1;
+        const endSrNo = startSrNo + rows.length - 1;
+
+        // E. Prepare In-Memory Entities with Application-Generated UUIDs
+        const cashflowData: Prisma.MasterCashflowCreateManyInput[] = [];
+        const auditData: Prisma.AuditTrailCreateManyInput[] = [];
+        const importedIds: string[] = [];
+
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          const assignedSrNo = startSrNo + i;
+          const entityId = randomUUID();
+          importedIds.push(entityId);
+
+          const gh = headMap.get(row.Group_Head_Name.trim().toLowerCase())!;
+          const memMap = memberCache.get(gh.id)!;
+          const familyMemberId =
+            memMap.get(row.Family_Member_Name.trim().toLowerCase()) ?? null;
+
+          const monthLabel =
+            row.Month?.trim() || deriveMonthFromDate(row.Transaction_Date);
+
+          const effectiveUserId =
+            row.User_Id?.trim() || gh.pan || currentUser.id;
+
+          cashflowData.push({
+            id: entityId,
+            srNo: assignedSrNo,
+            dateOfEntry: row.Date_Of_Entry || todayStr,
+            userId: effectiveUserId,
+            month: monthLabel,
+            clientOwner:
+              row.Client_Owner?.trim() || gh.contactPerson || 'Wealth Advisor',
+            groupHeadId: gh.id,
+            groupHeadName: gh.name,
+            familyMemberId,
+            familyMemberName: row.Family_Member_Name.trim(),
+            transactionDate: row.Transaction_Date,
+            transactionType: row.Transaction_Type,
+            category: row.Category,
+            subCategory: row.Sub_Category,
+            amounts: row.Amounts,
+            newInvestments: row.New_Investments ?? 0,
+            profitLoss: row.Profit_Loss ?? 0,
+            xirr: row.XIRR ?? 0,
+            approvalStatus: ApprovalStatus.PENDING,
+            voided: false,
+            submittedById: currentUser.id,
+            submittedByName: actorName,
+            submittedAt: now,
+          });
+
+          auditData.push({
+            id: randomUUID(),
+            action: AuditAction.IMPORTED,
+            userId: currentUser.id,
+            userName: actorName,
+            reason: 'Bulk broker trade import via spreadsheet.',
+            cashflowId: entityId,
+            changes: {
+              Sr_No: assignedSrNo,
+              Amounts: row.Amounts,
+              Transaction_Type: row.Transaction_Type,
+              Category: row.Category,
+              Sub_Category: row.Sub_Category,
+            },
+            timestamp: now,
+          });
+        }
+
+        // F. Atomic Batch Inserts (High Performance Bulk Operations)
+        await tx.masterCashflow.createMany({
+          data: cashflowData,
+        });
+
+        await tx.auditTrail.createMany({
+          data: auditData,
+        });
+
+        return {
+          count: rows.length,
+          importedIds,
+          srNoRange: {
+            start: startSrNo,
+            end: endSrNo,
+          },
+        };
+      },
+      { timeout: 45000 },
+    );
   }
 }

@@ -393,7 +393,9 @@ describe('Master Cashflows (e2e)', () => {
       const latestAudit = auditRes.body.auditEntries[0];
       expect(latestAudit.action).toBe('CORRECTED');
       expect(latestAudit.reason).toContain('broker contract note');
-      expect(latestAudit.changes).toHaveProperty('Amounts');
+      expect(latestAudit.changes).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'Amounts' })]),
+      );
     });
   });
 

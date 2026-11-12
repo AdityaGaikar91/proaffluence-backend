@@ -24,6 +24,7 @@ import { VoidCashflowDto } from './dto/void-cashflow.dto';
 import { ReturnCashflowDto } from './dto/return-cashflow.dto';
 import { BulkActionDto } from './dto/bulk-action.dto';
 import { QueryCashflowDto } from './dto/query-cashflow.dto';
+import { ImportCashflowRowsDto } from './dto/import-cashflow.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -52,6 +53,30 @@ export class CashflowsController {
     @CurrentUser() user: { id: string; name?: string; role?: string },
   ) {
     return this.cashflowsService.create(dto, user);
+  }
+
+  @Post('import')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Batch import trade cashflow entries from spreadsheet or clipboard',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Returns count of imported entries and assigned Sr_No range.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation failed or Group Head mandate not found.',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'One or more reporting months in the payload are frozen.',
+  })
+  async batchImport(
+    @Body() dto: ImportCashflowRowsDto,
+    @CurrentUser() user: { id: string; name?: string; role?: string },
+  ) {
+    return this.cashflowsService.batchImport(dto, user);
   }
 
   @Get()
