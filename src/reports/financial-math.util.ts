@@ -262,8 +262,15 @@ export function sumClosingBalancesAtPeriodEnd(params: {
   }>;
   periodEnd: Date;
   category?: string | null;
+  /**
+   * Months (YYYY-MM) in which the mandate has a valuation snapshot (any category).
+   * When given, the period end reads the latest snapshot month on/before it and a
+   * category missing from that snapshot counts as 0 (Excel SUMIFS on the exact
+   * month), instead of carrying the category's older balance forward.
+   */
+  snapshotMonthKeys?: string[] | null;
 }): number | null {
-  const { closingBalances, periodEnd, category } = params;
+  const { closingBalances, periodEnd, category, snapshotMonthKeys } = params;
   if (!closingBalances || closingBalances.length === 0) return null;
 
   const catNorm =
@@ -284,6 +291,23 @@ export function sumClosingBalancesAtPeriodEnd(params: {
   if (filtered.length === 0) return null;
 
   const targetKey = monthKeyFromDate(periodEnd);
+
+  if (snapshotMonthKeys && snapshotMonthKeys.length > 0) {
+    const snapshotKey = snapshotMonthKeys
+      .filter((k) => Boolean(k) && k <= targetKey)
+      .sort()
+      .at(-1);
+    if (!snapshotKey) return null;
+    // Category never valued on/before the snapshot → not yet funded (null)
+    if (!filtered.some((b) => (b.resolvedKey as string) <= snapshotKey)) {
+      return null;
+    }
+    return Math.round(
+      filtered
+        .filter((b) => b.resolvedKey === snapshotKey)
+        .reduce((acc, b) => acc + Number(b.closingAmount || 0), 0),
+    );
+  }
 
   const exact = filtered.filter((b) => b.resolvedKey === targetKey);
   if (exact.length > 0) {
@@ -353,6 +377,39 @@ export function sumOpeningClosingBeforeDate(params: {
     monthKey: latestKey,
     asOfDate: lastDayOfMonthKey(latestKey),
   };
+}
+
+/**
+ * Keep only cashflows dated on or before the report end date (inclusive).
+ * Rows whose date cannot be parsed are kept so downstream validation still sees them.
+ */
+export function filterCashflowsOnOrBefore<
+  T extends { transactionDate: string },
+>(cashflows: T[], endDate: string | Date): T[] {
+  const end = endDate instanceof Date ? endDate : tryParseDdMmYyyy(endDate);
+  if (!end) return [...cashflows];
+  return cashflows.filter((cf) => {
+    const dt = tryParseDdMmYyyy(cf.transactionDate);
+    return dt === null || dt.getTime() <= end.getTime();
+  });
+}
+
+/** Distinct valuation months (YYYY-MM) present in a closing-balance set, sorted. */
+export function valuationMonthKeys(
+  closingBalances: Array<{ monthKey?: string | null; dateOfEntry?: string }>,
+): string[] {
+  return Array.from(
+    new Set(
+      closingBalances
+        .map((b) => resolveRowMonthKey(b))
+        .filter((k): k is string => Boolean(k)),
+    ),
+  ).sort();
+}
+
+/** Calendar day after `date` (UTC). */
+export function nextDay(date: Date): Date {
+  return new Date(date.getTime() + 24 * 60 * 60 * 1000);
 }
 
 export function earliestClosingMonthKey(
