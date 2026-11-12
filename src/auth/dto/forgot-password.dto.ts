@@ -12,7 +12,7 @@ export class ForgotPasswordDto {
 
   @ApiPropertyOptional({
     description: 'Optional frontend redirect URL for password reset page',
-    example: 'http://localhost:3000/reset-password',
+    example: 'http://localhost:5173/reset-password',
   })
   @IsOptional()
   @IsString({ message: 'redirectTo must be a string' })

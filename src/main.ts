@@ -26,7 +26,7 @@ async function bootstrap() {
   const trustProxy = configService.get<boolean>('TRUST_PROXY', false);
   const swaggerEnabled = configService.get<boolean>('SWAGGER_ENABLED', true);
   const frontendOrigins = configService
-    .get<string>('FRONTEND_ORIGINS', 'http://localhost:3000')
+    .get<string>('FRONTEND_ORIGINS', 'http://localhost:5173')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);

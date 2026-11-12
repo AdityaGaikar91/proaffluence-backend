@@ -3,7 +3,7 @@ import { registerAs } from '@nestjs/config';
 export const appConfig = registerAs('app', () => ({
   nodeEnv: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '8002', 10),
-  frontendOrigins: (process.env.FRONTEND_ORIGINS || 'http://localhost:3000')
+  frontendOrigins: (process.env.FRONTEND_ORIGINS || 'http://localhost:5173')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),

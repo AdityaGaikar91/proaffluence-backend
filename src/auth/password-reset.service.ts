@@ -54,16 +54,21 @@ export class PasswordResetService {
       },
     });
 
-    // Determine the base reset page URL
+    // Determine the base reset page URL (Vite frontend on port 5173)
     const defaultFrontend =
       this.configService
-        .get<string>('FRONTEND_ORIGINS', 'http://localhost:3000')
+        .get<string>('FRONTEND_ORIGINS', 'http://localhost:5173')
         .split(',')[0]
-        .trim() || 'http://localhost:3000';
+        .trim() || 'http://localhost:5173';
 
     const baseUrl = dto.redirectTo || `${defaultFrontend}/reset-password`;
     const separator = baseUrl.includes('?') ? '&' : '?';
     const resetUrl = `${baseUrl}${separator}token=${token}`;
+
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.log(`[DEV ONLY] Password reset token for ${user.email}: ${token}`);
+      this.logger.log(`[DEV ONLY] Reset URL: ${resetUrl}`);
+    }
 
     // Dispatch email via MailService (SMTP in production, console logger in dev)
     await this.mailService.sendPasswordResetEmail(user.email, resetUrl);

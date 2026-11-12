@@ -93,7 +93,7 @@ export class MailService {
       );
     }
     if (!isProd && text) {
-      this.logger.debug(`BODY_TEXT_LEN=${text.length}`);
+      this.logger.log(`[DEV EMAIL BODY]\n${text}`);
     }
 
     return { sent: true, method: 'console', messageId: generatedMsgId };

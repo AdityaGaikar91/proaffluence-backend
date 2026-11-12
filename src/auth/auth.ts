@@ -20,7 +20,7 @@ const signinRateLimitWindow = parseInt(
   10,
 );
 
-const trustedOrigins = (process.env.FRONTEND_ORIGINS || 'http://localhost:3000')
+const trustedOrigins = (process.env.FRONTEND_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
