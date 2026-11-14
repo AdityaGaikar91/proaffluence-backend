@@ -2,7 +2,7 @@ import { ABC_REFERENCE_DASHBOARD, DUMMY_REFERENCE_DASHBOARD } from './o-template
 import {
   calculateAbsoluteReturn,
   resolveReturnBy12MonthRule,
-  TWELVE_MONTH_DAY_THRESHOLD,
+  TWELVE_MONTH_RULE_MIN_DAYS,
 } from './financial-math.util';
 
 /**
@@ -32,8 +32,8 @@ describe('Golden ABC / Dummy dashboard fixtures', () => {
     expect(fy!.xirr).toBe(22.28);
   });
 
-  it('12-month rule threshold remains 364 days (Excel leap/non-leap FY)', () => {
-    expect(TWELVE_MONTH_DAY_THRESHOLD).toBe(364);
+  it('12-month rule: a full FY (365 days inclusive) resolves to XIRR', () => {
+    expect(TWELVE_MONTH_RULE_MIN_DAYS).toBe(365);
     const start = new Date(Date.UTC(2025, 3, 1));
     const end = new Date(Date.UTC(2026, 2, 31));
     const resolved = resolveReturnBy12MonthRule({
@@ -46,7 +46,8 @@ describe('Golden ABC / Dummy dashboard fixtures', () => {
     expect(resolved.value).toBe(12.5);
   });
 
-  it('AR denominator uses opening+purchases-redemptions (Excel parity)', () => {
+  it('AR denominator uses opening+purchases-redemptions (Net Investment basis)', () => {
+    // (160 + 10 - 100 - 50) / (100 + 50 - 10) = 20 / 140 = 14.29
     expect(
       calculateAbsoluteReturn({
         openingBalance: 100,

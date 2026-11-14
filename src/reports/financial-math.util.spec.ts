@@ -11,7 +11,8 @@ import {
   resolveReturnBy12MonthRule,
   sumClosingBalancesAtPeriodEnd,
   sumOpeningClosingBeforeDate,
-  TWELVE_MONTH_DAY_THRESHOLD,
+  periodDurationDays,
+  TWELVE_MONTH_RULE_MIN_DAYS,
 } from './financial-math.util';
 
 describe('sumClosingBalancesAtPeriodEnd (monthKey)', () => {
@@ -75,12 +76,13 @@ describe('sumClosingBalancesAtPeriodEnd (monthKey)', () => {
   });
 });
 
-describe('resolveReturnBy12MonthRule (>=364)', () => {
-  it('uses XIRR for non-leap full Indian FY (364 days)', () => {
+describe('resolveReturnBy12MonthRule (REQUIREMENTS §6.1: >= 365 days, inclusive)', () => {
+  it('uses XIRR for a non-leap full Indian FY (01-04 → 31-03 = 365 days inclusive)', () => {
     const start = parseDdMmYyyy('01-04-2020');
     const end = parseDdMmYyyy('31-03-2021');
     expect(daysBetween(start, end)).toBe(364);
-    expect(TWELVE_MONTH_DAY_THRESHOLD).toBe(364);
+    expect(periodDurationDays(start, end)).toBe(365);
+    expect(TWELVE_MONTH_RULE_MIN_DAYS).toBe(365);
     const resolved = resolveReturnBy12MonthRule({
       startDate: start,
       endDate: end,
@@ -91,10 +93,10 @@ describe('resolveReturnBy12MonthRule (>=364)', () => {
     expect(resolved.value).toBe(70.66);
   });
 
-  it('uses AR for partial HY1 windows under 364 days', () => {
+  it('uses AR for partial HY1 windows under 12 months', () => {
     const start = parseDdMmYyyy('01-04-2026');
     const end = parseDdMmYyyy('30-09-2026');
-    expect(daysBetween(start, end)).toBeLessThan(364);
+    expect(periodDurationDays(start, end)).toBe(183);
     const resolved = resolveReturnBy12MonthRule({
       startDate: start,
       endDate: end,
@@ -106,11 +108,11 @@ describe('resolveReturnBy12MonthRule (>=364)', () => {
   });
 });
 
-describe('calculateAbsoluteReturn (Excel denominator)', () => {
+describe('calculateAbsoluteReturn (Net Investment denominator = Opening + Purchases - Redemptions)', () => {
   it('divides gain by opening + purchases - redemptions', () => {
     // netGain = 110 + 20 - 100 - 50 = -20
     // denom  = 100 + 50 - 20 = 130
-    // AR     = -20/130 * 100 ≈ -15.38
+    // AR     = -20/130 * 100 = -15.38
     const ar = calculateAbsoluteReturn({
       openingBalance: 100,
       purchases: 50,
@@ -120,24 +122,33 @@ describe('calculateAbsoluteReturn (Excel denominator)', () => {
     expect(ar).toBe(-15.38);
   });
 
-  it('matches FY26-27 style partial window vs opening+purchases-only', () => {
+  it('matches the O_Template / Output_GL_123 Opening + Purchases - Redemptions basis', () => {
     const opening = 69_288_029;
     const purchases = 1_000_000;
     const redemptions = 5_000_000;
     const closing = 70_000_000;
-    const excelStyle = calculateAbsoluteReturn({
+    const ar = calculateAbsoluteReturn({
       openingBalance: opening,
       purchases,
       redemptions,
       closingBalance: closing,
     });
-    const oldDenom = opening + purchases;
     const netGain = closing + redemptions - opening - purchases;
-    const oldStyle = Number(((netGain / oldDenom) * 100).toFixed(2));
-    expect(excelStyle).not.toBe(oldStyle);
-    expect(excelStyle).toBe(
-      Number(((netGain / (opening + purchases - redemptions)) * 100).toFixed(2)),
+    const excelVariant = Number(
+      ((netGain / (opening + purchases - redemptions)) * 100).toFixed(2),
     );
+    expect(ar).toBe(excelVariant);
+  });
+
+  it('returns null when denominator is zero or negative', () => {
+    expect(
+      calculateAbsoluteReturn({
+        openingBalance: 0,
+        purchases: 50,
+        redemptions: 50,
+        closingBalance: 10,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -174,7 +185,7 @@ describe('category mid-FY 12-month rule', () => {
   it('uses AR when first cashflow is ~120 days before FY end', () => {
     const start = parseDdMmYyyy('01-12-2018'); // first STOCK trade
     const end = parseDdMmYyyy('31-03-2019');
-    expect(daysBetween(start, end)).toBeLessThan(364);
+    expect(periodDurationDays(start, end)).toBeLessThan(365);
     const resolved = resolveReturnBy12MonthRule({
       startDate: start,
       endDate: end,

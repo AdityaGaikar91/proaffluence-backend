@@ -1,8 +1,9 @@
 /**
  * Financial Math & O_Template.xlsx Reverse-Engineered Calculation Engine
  * Implements:
- * 1. Newton-Raphson XIRR with bisection fallback (for periods >= 364 days / ~12 months)
- * 2. Point-to-Point Absolute Return AR_Val (for periods < 364 days)
+ * 1. Newton-Raphson XIRR with bisection fallback (periods of 12 months or more,
+ *    i.e. >= 365 days counting both From and To dates — REQUIREMENTS.md §6.1)
+ * 2. Point-to-Point Absolute Return AR_Val (periods under 12 months / < 365 days)
  * 3. Hybrid 50/50 Asset Allocation Split (or custom scheme-level overrides)
  * 4. Cashflow-Weighted Benchmark Triangulation (Nifty 50 TRI / BSE 500 / Sensex)
  *
@@ -80,6 +81,28 @@ export function daysBetween(start: Date, end: Date): number {
 }
 
 /**
+ * REQUIREMENTS.md §6.1 — The 12-Month Rule.
+ * A period of 12 months or more (>= 365 days) uses XIRR; anything shorter uses
+ * Absolute (Point-to-Point) Return. The period runs from From_Date to To_Date
+ * with both dates included, so a full Indian FY (01-04 → 31-03) is 365 days
+ * (366 in a leap FY) and counts as 12 months, while 01-04 → 30-03 is 364 days.
+ */
+export const TWELVE_MONTH_RULE_MIN_DAYS = 365;
+
+/** Day-count basis of the XIRR equation: (d_i - d_0) / 365 (REQUIREMENTS.md §6.1). */
+export const XIRR_DAY_COUNT_BASIS = 365;
+
+/** Length of a reporting period in days, counting both the From and To dates. */
+export function periodDurationDays(start: Date, end: Date): number {
+  return daysBetween(start, end) + 1;
+}
+
+/** True when the period is 12 months or more (>= 365 days) → XIRR applies. */
+export function isTwelveMonthPeriod(start: Date, end: Date): boolean {
+  return periodDurationDays(start, end) >= TWELVE_MONTH_RULE_MIN_DAYS;
+}
+
+/**
  * Computes Extended Internal Rate of Return (XIRR) as a percentage (e.g., 16.55 for 16.55%).
  * Cashflow sign convention matching Excel XIRR:
  * - Outflows (Opening Balance + Purchases): negative (-)
@@ -105,7 +128,8 @@ export function calculateXirr(
   const npv = (rate: number): number => {
     let sum = 0;
     for (const cf of valid) {
-      const years = (cf.date.getTime() - d0) / (msPerDay * 365);
+      const years =
+        (cf.date.getTime() - d0) / (msPerDay * XIRR_DAY_COUNT_BASIS);
       sum += cf.amount / Math.pow(1 + rate, years);
     }
     return sum;
@@ -114,7 +138,8 @@ export function calculateXirr(
   const dNpv = (rate: number): number => {
     let sum = 0;
     for (const cf of valid) {
-      const years = (cf.date.getTime() - d0) / (msPerDay * 365);
+      const years =
+        (cf.date.getTime() - d0) / (msPerDay * XIRR_DAY_COUNT_BASIS);
       if (years === 0) continue;
       sum -= (years * cf.amount) / Math.pow(1 + rate, years + 1);
     }
@@ -160,41 +185,40 @@ export function calculateXirr(
 
 /**
  * Computes Point-to-Point Absolute Return (AR_Val) as a percentage for periods < 12 months.
- * Formula matching O_Template.xlsx DashData (Excel parity):
+ * REQUIREMENTS.md §6.1:
  * AR_Val = ((Closing + Redemptions - Opening - Purchases) /
- *           (Opening + Purchases - Redemptions)) * 100
+ *           (Opening + Purchases)) * 100
+ * Returns null when the capital base (Opening + Purchases) is zero — the return is
+ * not computable and must not be invented (zero-estimation policy).
  */
 export function calculateAbsoluteReturn(params: {
   openingBalance: number;
   purchases: number;
   redemptions: number;
   closingBalance: number;
-}): number {
+}): number | null {
   const opening = new Decimal(params.openingBalance || 0);
   const purchases = new Decimal(params.purchases || 0);
   const redemptions = new Decimal(params.redemptions || 0);
   const closing = new Decimal(params.closingBalance || 0);
   const denominator = opening.plus(purchases).minus(redemptions);
-  if (denominator.abs().lte(0.001)) return 0;
+  if (denominator.abs().lte(0.001) || denominator.lte(0)) return null;
   const netGain = closing.plus(redemptions).minus(opening).minus(purchases);
   return Number(netGain.div(denominator).times(100).toFixed(2));
 }
 
 /**
- * O_Template.xlsx 12-Month Switch Rule:
- * - Periods >= 364 days (covers non-leap Apr 1 → Mar 31 = 364 days) -> XIRR_Val
- * - Periods < 364 days -> AR_Val (Point-to-Point Absolute Return)
+ * 12-Month Switch Rule (REQUIREMENTS.md §6.1, O_Template XIRR_Val / AR_Val):
+ * - Periods of 12 months or more (>= 365 days, From and To inclusive) -> XIRR_Val
+ * - Periods under 12 months (< 365 days) -> AR_Val (Point-to-Point Absolute Return)
  */
-export const TWELVE_MONTH_DAY_THRESHOLD = 364;
-
 export function resolveReturnBy12MonthRule(params: {
   startDate: Date;
   endDate: Date;
   xirrVal: number | null;
   arVal: number | null;
 }): { value: number | null; method: 'XIRR' | 'AR' | 'UNAVAILABLE' } {
-  const durationDays = daysBetween(params.startDate, params.endDate);
-  if (durationDays >= TWELVE_MONTH_DAY_THRESHOLD) {
+  if (isTwelveMonthPeriod(params.startDate, params.endDate)) {
     if (params.xirrVal === null) {
       return { value: null, method: 'UNAVAILABLE' };
     }
@@ -236,10 +260,14 @@ export function firstDayOfFyContainingMonthKey(monthKey: string): Date {
 
 export function resolveRowMonthKey(row: {
   monthKey?: string | null;
+  closingBalanceDate?: string | null;
   dateOfEntry?: string;
 }): string | null {
   if (row.monthKey && /^\d{4}-(0[1-9]|1[0-2])$/.test(row.monthKey.trim())) {
     return row.monthKey.trim();
+  }
+  if (row.closingBalanceDate) {
+    return monthKeyFromDate(parseDdMmYyyy(row.closingBalanceDate));
   }
   if (row.dateOfEntry) {
     return monthKeyFromDate(parseDdMmYyyy(row.dateOfEntry));
@@ -372,10 +400,20 @@ export function sumOpeningClosingBeforeDate(params: {
       .reduce((acc, b) => acc + Number(b.closingAmount || 0), 0),
   );
   if (amount <= 0) return null;
+  const latestRow = eligible.find((b) => b.resolvedKey === latestKey);
+  const asOfDate =
+    latestRow &&
+    'closingBalanceDate' in latestRow &&
+    (latestRow as { closingBalanceDate?: string | null }).closingBalanceDate
+      ? parseDdMmYyyy(
+          (latestRow as { closingBalanceDate?: string | null })
+            .closingBalanceDate!,
+        )
+      : lastDayOfMonthKey(latestKey);
   return {
     amount,
     monthKey: latestKey,
-    asOfDate: lastDayOfMonthKey(latestKey),
+    asOfDate,
   };
 }
 
@@ -392,6 +430,125 @@ export function filterCashflowsOnOrBefore<
     const dt = tryParseDdMmYyyy(cf.transactionDate);
     return dt === null || dt.getTime() <= end.getTime();
   });
+}
+
+/**
+ * Since-Inception start = header "From Period" (Excel AddtnlInfo!B3), as of a report date:
+ * the day after the latest valuation month before the first trade (e.g. 01-04-2018
+ * for a Mar-18 opening), else the first trade date. Ledger rows after the report
+ * date are ignored. Returns null when there is no ledger data on/before the date.
+ */
+export function sinceInceptionStartDate(params: {
+  cashflows: Array<{ transactionDate: string }>;
+  closingBalances: Array<{
+    monthKey?: string | null;
+    dateOfEntry?: string;
+    closingAmount: number | null | undefined;
+    category?: string;
+  }>;
+  toPeriod: string;
+}): Date | null {
+  const end = parseDdMmYyyy(params.toPeriod);
+  const endKey = monthKeyFromDate(end);
+  const tradeDates = filterCashflowsOnOrBefore(params.cashflows, end)
+    .map((c) => tryParseDdMmYyyy(c.transactionDate))
+    .filter((dt): dt is Date => dt !== null)
+    .sort((a, b) => a.getTime() - b.getTime());
+  const closings = params.closingBalances.filter((b) => {
+    const key = resolveRowMonthKey(b);
+    return key !== null && key <= endKey;
+  });
+  if (tradeDates.length === 0) {
+    const firstKey = earliestClosingMonthKey(closings);
+    return firstKey ? nextDay(lastDayOfMonthKey(firstKey)) : null;
+  }
+  const opening = sumOpeningClosingBeforeDate({
+    closingBalances: closings,
+    beforeDate: tradeDates[0],
+  });
+  return opening ? nextDay(opening.asOfDate) : tradeDates[0];
+}
+
+export interface FromPeriodWindow<C, B> {
+  cashflows: C[];
+  closingBalances: B[];
+  /** Day after the opening valuation month (dd-MM-yyyy); null = no window (from data start). */
+  windowStart: string | null;
+  /** Valuation month (YYYY-MM) that opens the window. */
+  openingMonthKey: string | null;
+}
+
+/**
+ * Applies a user-requested From Period (dd-MM-yyyy) to the ledger.
+ * - Missing / on-or-before the data start → no window (clamped to data start).
+ * - Later than the data start → the report runs from the day after the latest
+ *   month-end valuation before the requested date (the opening value), e.g.
+ *   01-04-2024 opens on the Mar-24 valuation; 15-06-2024 snaps back to 01-06-2024.
+ *   Cashflows before that day and valuations before the opening month are dropped.
+ * Throws Error with a user-facing message when the date is invalid, after the
+ * report date, or has no valuation before it to open the period.
+ */
+export function applyFromPeriodWindow<
+  C extends { transactionDate: string },
+  B extends {
+    monthKey?: string | null;
+    dateOfEntry?: string;
+    closingAmount: number | null | undefined;
+  },
+>(params: {
+  cashflows: C[];
+  closingBalances: B[];
+  requestedFrom?: string | null;
+  toPeriod: string;
+}): FromPeriodWindow<C, B> {
+  const { cashflows, closingBalances, toPeriod } = params;
+  const none: FromPeriodWindow<C, B> = {
+    cashflows,
+    closingBalances,
+    windowStart: null,
+    openingMonthKey: null,
+  };
+  const raw = (params.requestedFrom || '').trim();
+  if (!raw) return none;
+  const requested = parseDdMmYyyy(raw);
+  const end = parseDdMmYyyy(toPeriod);
+  if (requested.getTime() > end.getTime()) {
+    throw new Error(`From Period ${raw} is after To Period ${toPeriod}.`);
+  }
+  const dataStart = sinceInceptionStartDate({
+    cashflows,
+    closingBalances,
+    toPeriod,
+  });
+  if (!dataStart || requested.getTime() <= dataStart.getTime()) return none;
+
+  const fromKey = monthKeyFromDate(requested);
+  const openingMonthKey =
+    valuationMonthKeys(
+      closingBalances.filter(
+        (b) => b.closingAmount !== null && b.closingAmount !== undefined,
+      ),
+    )
+      .filter((k) => k < fromKey)
+      .at(-1) ?? null;
+  if (!openingMonthKey) {
+    throw new Error(
+      `From Period ${raw} has no month-end closing valuation before it to open the period.`,
+    );
+  }
+  const start = nextDay(lastDayOfMonthKey(openingMonthKey));
+  return {
+    cashflows: cashflows.filter((c) => {
+      const dt = tryParseDdMmYyyy(c.transactionDate);
+      return dt === null || dt.getTime() >= start.getTime();
+    }),
+    closingBalances: closingBalances.filter((b) => {
+      const key = resolveRowMonthKey(b);
+      return key !== null && key >= openingMonthKey;
+    }),
+    windowStart: formatDdMmYyyy(start),
+    openingMonthKey,
+  };
 }
 
 /** Distinct valuation months (YYYY-MM) present in a closing-balance set, sorted. */
@@ -462,13 +619,12 @@ export function generateFiscalPeriods(
     const effectiveEnd = toDate.getTime() < fyEnd.getTime() ? toDate : fyEnd;
 
     const fyLabel = `FY ${y}-${String(y + 1).slice(-2)}`;
-    const duration = daysBetween(effectiveStart, effectiveEnd);
 
     periods.push({
       fyLabel,
       startDate: effectiveStart,
       endDate: effectiveEnd,
-      isPartial: duration < 364,
+      isPartial: !isTwelveMonthPeriod(effectiveStart, effectiveEnd),
     });
   }
 
@@ -598,8 +754,7 @@ export function calculateCashflowWeightedBenchmarkReturn(params: {
 
   syntheticCashflows.push({ date: periodEnd, amount: terminalBenchmarkValue });
 
-  const durationDays = daysBetween(periodStart, periodEnd);
-  if (durationDays >= TWELVE_MONTH_DAY_THRESHOLD) {
+  if (isTwelveMonthPeriod(periodStart, periodEnd)) {
     return calculateXirr(syntheticCashflows);
   }
 
