@@ -21,6 +21,7 @@ import { ClosingBalancesService } from './closing-balances.service';
 import { QueryClosingBalanceDto } from './dto/query-closing-balance.dto';
 import { UpdateClosingAmountsDto } from './dto/update-closing-amounts.dto';
 import { InitializeMonthDto } from './dto/initialize-month.dto';
+import { QueryMonthRangeDto } from './dto/query-month-range.dto';
 import { CreateClosingBalanceDto } from './dto/create-closing-balance.dto';
 import { ReturnBalanceDto } from './dto/return-balance.dto';
 import { BulkBalanceActionDto } from './dto/bulk-balance-action.dto';
@@ -65,11 +66,11 @@ export class ClosingBalancesController {
   @Get('months')
   @ApiOperation({
     summary:
-      'List reporting cycles (monthKey) that hold closing balances, with earliest/latest',
+      'List reporting cycles (monthKey) that hold closing balances, with earliest/latest. Optional approvedOnly / groupHeadId filters.',
   })
   @ApiResponse({ status: 200, description: 'Distinct cycles, oldest first.' })
-  async getMonthRange() {
-    return this.closingBalancesService.getMonthRange();
+  async getMonthRange(@Query() query: QueryMonthRangeDto) {
+    return this.closingBalancesService.getMonthRange(query);
   }
 
   @Post('initialize-month')

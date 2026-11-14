@@ -36,6 +36,18 @@ export class CreateClosingBalanceDto {
   Date_Of_Entry: string;
 
   @ApiPropertyOptional({
+    example: '31-03-2018',
+    description:
+      'Valuation date of the balance in dd-MM-yyyy format (CB sheet Closing_Balance_date)',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{2}-\d{2}-\d{4}$/, {
+    message: 'Closing_Balance_date must be in dd-MM-yyyy format',
+  })
+  Closing_Balance_date?: string;
+
+  @ApiPropertyOptional({
     example: 'USR-001',
     description: 'Operator or client PAN identifier',
   })

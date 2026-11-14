@@ -10,6 +10,7 @@ import { ReportingFreezeService } from '../core/reporting/reporting-freeze.servi
 import { QueryClosingBalanceDto } from './dto/query-closing-balance.dto';
 import { UpdateClosingAmountsDto } from './dto/update-closing-amounts.dto';
 import { InitializeMonthDto } from './dto/initialize-month.dto';
+import { QueryMonthRangeDto } from './dto/query-month-range.dto';
 import { CreateClosingBalanceDto } from './dto/create-closing-balance.dto';
 import { ReturnBalanceDto } from './dto/return-balance.dto';
 import { ApproveMonthDto } from './dto/approve-month.dto';
@@ -227,14 +228,27 @@ export class ClosingBalancesService {
    * Reporting cycles that hold closing balance rows (non-voided), oldest first.
    * Lets the UI start its cycle picker at the earliest month in the data.
    */
-  async getMonthRange(): Promise<{
+  async getMonthRange(query: QueryMonthRangeDto = {}): Promise<{
     earliestMonthKey: string | null;
     latestMonthKey: string | null;
     months: Array<{ monthKey: string; count: number }>;
   }> {
+    const groupHeadId = query.groupHeadId?.trim();
+    const where: Prisma.ClosingBalanceWhereInput = {
+      voided: false,
+      ...(query.approvedOnly
+        ? {
+            approvalStatus: ApprovalStatus.APPROVED,
+            closingAmount: { not: null },
+          }
+        : {}),
+      ...(groupHeadId && groupHeadId.toLowerCase() !== 'all'
+        ? { groupHeadId }
+        : {}),
+    };
     const grouped = await this.prisma.closingBalance.groupBy({
       by: ['monthKey'],
-      where: { voided: false },
+      where,
       _count: { _all: true },
       orderBy: { monthKey: 'asc' },
     });
@@ -428,6 +442,7 @@ export class ClosingBalancesService {
               toCreate.push({
                 srNo: currentSrNo++,
                 dateOfEntry: entryDate,
+                closingBalanceDate: entryDate,
                 userId: pan,
                 monthKey,
                 month: monthLabel,
@@ -705,6 +720,9 @@ export class ClosingBalancesService {
         }
 
         // 2. Same-month category+subCategory: Excel sums — aggregate into existing row
+        const effectiveClosingDate =
+          dto.Closing_Balance_date?.trim() || defaultDateForMonthKey(monthKey);
+
         const duplicate = await tx.closingBalance.findFirst({
           where: {
             monthKey,
@@ -739,6 +757,7 @@ export class ClosingBalancesService {
               closingAmount:
                 summed === null ? null : new Prisma.Decimal(summed),
               dateOfEntry: dto.Date_Of_Entry,
+              closingBalanceDate: effectiveClosingDate,
               approvalStatus: ApprovalStatus.PENDING,
               returnReason: null,
               approvedById: null,
@@ -811,6 +830,7 @@ export class ClosingBalancesService {
           data: {
             srNo: assignedSrNo,
             dateOfEntry: dto.Date_Of_Entry,
+            closingBalanceDate: effectiveClosingDate,
             userId: dto.User_Id || groupHead.pan || currentUser.id,
             monthKey,
             month: monthLabel,
@@ -1359,6 +1379,7 @@ export class ClosingBalancesService {
         subCategory: string;
         closingAmount: number | null;
         dateOfEntry: string;
+        closingBalanceDate: string;
         userId: string;
         monthKey: string;
         monthLabel: string;
@@ -1448,7 +1469,12 @@ export class ClosingBalancesService {
             row.Closing_Amount === undefined || row.Closing_Amount === null
               ? null
               : row.Closing_Amount,
-          dateOfEntry: row.Date_Of_Entry || defaultDateForMonthKey(monthKey),
+          dateOfEntry:
+            row.Date_Of_Entry?.trim() ||
+            defaultDateForMonthKey(monthKey),
+          closingBalanceDate:
+            row.Closing_Balance_date?.trim() ||
+            defaultDateForMonthKey(monthKey),
           userId: row.User_Id?.trim() || gh.pan || currentUser.id,
           monthKey,
           monthLabel: row.Month?.trim() || monthLabelFromKey(monthKey),
@@ -1487,6 +1513,7 @@ export class ClosingBalancesService {
           id: entityId,
           srNo: assignedSrNo,
           dateOfEntry: row.dateOfEntry,
+          closingBalanceDate: row.closingBalanceDate,
           userId: row.userId,
           monthKey: row.monthKey,
           month: row.monthLabel,
