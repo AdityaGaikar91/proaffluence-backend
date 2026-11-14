@@ -6,6 +6,7 @@ model ClosingBalance {
   id                 String          @id @default(uuid())
   srNo               Int             @map("sr_no")
   dateOfEntry        String          @map("date_of_entry") // "dd-MM-yyyy"
+  closingBalanceDate String?         @map("closing_balance_date") // "dd-MM-yyyy" (Valuation balance date from CB sheet)
   userId             String          @map("user_id")
   monthKey           String          @map("month_key")     // "YYYY-MM" (e.g. "2026-09")
   month              String                                // "September 2026"
@@ -44,5 +45,6 @@ model ClosingBalance {
   @@unique([monthKey, groupHeadId, familyMemberName, category, subCategory])
   @@index([monthKey])
   @@index([approvalStatus])
+  @@index([closingBalanceDate])
   @@map("closing_balances")
 }

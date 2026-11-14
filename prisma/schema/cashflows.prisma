@@ -26,7 +26,7 @@ model MasterCashflow {
   amounts            Decimal         @db.Decimal(18, 2)
   newInvestments     Decimal         @default(0) @db.Decimal(18, 2)
   profitLoss         Decimal         @default(0) @db.Decimal(18, 2)
-  xirr               Decimal         @default(0) @db.Decimal(8, 4)
+  xirr               Decimal         @default(0) @db.Decimal(10, 4)
 
   // Maker-Checker & State Management
   voided             Boolean         @default(false)
@@ -53,5 +53,6 @@ model MasterCashflow {
   @@index([groupHeadId])
   @@index([approvalStatus])
   @@index([transactionDate])
+  @@index([groupHeadId, category, subCategory, transactionDate])
   @@map("master_cashflows")
 }
