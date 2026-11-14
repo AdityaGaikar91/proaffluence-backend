@@ -183,8 +183,9 @@ describe('OTemplateEngine dynamic dashboard', () => {
       dash.xirr
         .filter((r) => r.financialYear.startsWith('FY '))
         .map((r) => r.financialYear),
-    ).toEqual(['FY 2018-19']);
+    ).toEqual(['FY 2017-18', 'FY 2018-19']);
     expect(dash.assetAllocation.map((r) => r.financialYear)).toEqual([
+      'FY 2017-18',
       'FY 2018-19',
     ]);
     const netInv = dash.summary.find((r) => r.isTotalRow);

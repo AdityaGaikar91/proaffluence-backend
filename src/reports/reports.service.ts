@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -17,8 +19,12 @@ import {
   earliestClosingMonthKey,
   firstDayOfFyContainingMonthKey,
   formatDdMmYyyy,
+  lastDayOfMonthKey,
   normalizeAssetCategory,
+  applyFromPeriodWindow,
   parseDdMmYyyy,
+  sinceInceptionStartDate,
+  tryParseDdMmYyyy,
   valuationMonthKeys,
 } from './financial-math.util';
 import {
@@ -26,9 +32,60 @@ import {
   ExternalPdfSlot,
   FreezeReportingRunDto,
   GeneratePdfBatchDto,
+  OVERRIDE_REASON_MIN_LENGTH,
   QueryAnnualDashboardDto,
   UnfreezeReportingRunDto,
 } from './dto/reports.dto';
+
+/** Roles allowed to override a blocked pre-flight gate (freeze / calculation). */
+export const GATE_OVERRIDE_ROLES = ['manager', 'super_admin'] as const;
+
+export type ReportsActor = { id: string; name: string; role?: string | null };
+
+export type PreFlightBlocker = {
+  id: string;
+  type: string;
+  title: string;
+  description: string;
+};
+
+function blockingIssues(issues: readonly unknown[]): PreFlightBlocker[] {
+  return (issues as Array<Record<string, unknown>>)
+    .filter((i) => i.severity === 'blocking')
+    .map((i) => ({
+      id: String(i.id),
+      type: String(i.type),
+      title: String(i.title),
+      description: String(i.description),
+    }));
+}
+
+/**
+ * Validates an override request. Returns the trimmed reason when an override was
+ * requested, or null when it was not. Role is enforced here as well as by the
+ * controller's @Roles guard so the service can never be used to bypass it.
+ */
+function resolveOverride(
+  dto: { forceOverride?: boolean; overrideReason?: string },
+  user: ReportsActor,
+): string | null {
+  if (dto.forceOverride !== true) return null;
+  if (
+    !user.role ||
+    !(GATE_OVERRIDE_ROLES as readonly string[]).includes(user.role)
+  ) {
+    throw new ForbiddenException(
+      'Only an Operations Manager or Super Admin can override pre-flight blockers.',
+    );
+  }
+  const reason = (dto.overrideReason || '').trim();
+  if (reason.length < OVERRIDE_REASON_MIN_LENGTH) {
+    throw new BadRequestException(
+      `overrideReason is required to override pre-flight blockers (at least ${OVERRIDE_REASON_MIN_LENGTH} characters).`,
+    );
+  }
+  return reason;
+}
 
 function deriveMonthKeyFromPeriod(period: string): string {
   const trimmed = (period || '30-09-2026').trim();
@@ -163,6 +220,26 @@ export class ReportsService {
     const missingBalances = closingBalances.filter(
       (r) => r.closingAmount === null,
     );
+    // FR-3.2: an active Group Head with approved cashflows on/before the period
+    // end but no closing-balance row at all for the month is also missing data
+    // (a blank grid row is not required for the gap to count).
+    const periodEndDate =
+      tryParseDdMmYyyy(period) ?? lastDayOfMonthKey(effectiveMonthKey);
+    const headsWithClosingRows = new Set(
+      closingBalances.map((r) => r.groupHeadId),
+    );
+    const headsWithTradesToDate = new Set(
+      cashflows
+        .filter((e) => {
+          if (e.approvalStatus !== ApprovalStatus.APPROVED) return false;
+          const dt = tryParseDdMmYyyy(e.transactionDate);
+          return dt !== null && dt.getTime() <= periodEndDate.getTime();
+        })
+        .map((e) => e.groupHeadId),
+    );
+    const headsMissingClosingRows = groupHeads.filter(
+      (g) => headsWithTradesToDate.has(g.id) && !headsWithClosingRows.has(g.id),
+    );
     const pendingTrades = cashflows.filter(
       (e) => e.approvalStatus === ApprovalStatus.PENDING,
     );
@@ -178,8 +255,44 @@ export class ReportsService {
     const missingEmails = groupHeads.filter(
       (g) => !g.email || !g.email.trim() || !g.email.includes('@'),
     );
+    // FR-1.2: Inception Date = earliest portfolio investment date. Warn (never block,
+    // never auto-correct) when the stored date is after the client's first trade.
+    const firstTradeByHead = new Map<string, Date>();
+    for (const e of cashflows) {
+      const dt = tryParseDdMmYyyy(e.transactionDate);
+      if (!dt) continue;
+      const prev = firstTradeByHead.get(e.groupHeadId);
+      if (!prev || dt.getTime() < prev.getTime()) {
+        firstTradeByHead.set(e.groupHeadId, dt);
+      }
+    }
+    const inceptionAfterFirstTrade = groupHeads
+      .map((g) => ({
+        head: g,
+        inception: tryParseDdMmYyyy(g.inceptionDate || ''),
+        firstTrade: firstTradeByHead.get(g.id) ?? null,
+      }))
+      .filter(
+        (x) =>
+          x.firstTrade !== null &&
+          (x.inception === null ||
+            x.inception.getTime() > x.firstTrade.getTime()),
+      );
 
     const issues: Array<any> = [];
+
+    if (headsMissingClosingRows.length > 0) {
+      const sample = headsMissingClosingRows[0];
+      issues.push({
+        id: 'missing-balance-rows',
+        type: 'missing_balance',
+        severity: 'blocking',
+        title: `${headsMissingClosingRows.length} Client${headsMissingClosingRows.length > 1 ? 's' : ''} with no closing balance for ${effectiveMonthKey}`,
+        description: `${sample.name} (${sample.customId}) has approved cashflows but no ${effectiveMonthKey} valuation entered.`,
+        actionLabel: 'Review Balances',
+        targetRoute: '/closing-balances',
+      });
+    }
 
     if (missingBalances.length > 0) {
       const sample = missingBalances[0];
@@ -233,6 +346,19 @@ export class ReportsService {
       });
     }
 
+    if (inceptionAfterFirstTrade.length > 0) {
+      const sample = inceptionAfterFirstTrade[0];
+      issues.push({
+        id: 'inception-after-first-trade',
+        type: 'inception_date',
+        severity: 'warning',
+        title: `${inceptionAfterFirstTrade.length} Client${inceptionAfterFirstTrade.length > 1 ? 's' : ''} with Inception Date after first trade`,
+        description: `${sample.head.name} (${sample.head.customId}) inception ${sample.head.inceptionDate || 'blank'} is after its first trade on ${formatDdMmYyyy(sample.firstTrade as Date)}. Inception should be the earliest investment date (FR-1.2).`,
+        actionLabel: 'Update Client',
+        targetTab: 'group-heads',
+      });
+    }
+
     const totalReturned = returnedTrades.length + returnedBalances.length;
     if (totalReturned > 0) {
       issues.push({
@@ -264,14 +390,21 @@ export class ReportsService {
       });
     }
 
+    const missingBalanceCount =
+      missingBalances.length + headsMissingClosingRows.length;
+
     const balancesScore =
-      missingBalances.length === 0
+      missingBalanceCount === 0
         ? 30
         : Math.max(
             0,
             Math.round(
               (1 -
-                missingBalances.length / Math.max(1, closingBalances.length)) *
+                missingBalanceCount /
+                  Math.max(
+                    1,
+                    closingBalances.length + headsMissingClosingRows.length,
+                  )) *
                 30,
             ),
           );
@@ -312,13 +445,13 @@ export class ReportsService {
       balancesScore + tradesScore + balancesApproveScore + emailsScore;
 
     let passedChecks = 0;
-    if (missingBalances.length === 0) passedChecks += 1;
+    if (missingBalanceCount === 0) passedChecks += 1;
     if (pendingTrades.length === 0) passedChecks += 1;
     if (pendingBalances.length === 0) passedChecks += 1;
     if (missingEmails.length === 0) passedChecks += 1;
 
     const isReadyToFreeze =
-      missingBalances.length === 0 &&
+      missingBalanceCount === 0 &&
       pendingTrades.length === 0 &&
       pendingBalances.length === 0 &&
       missingEmails.length === 0;
@@ -333,11 +466,12 @@ export class ReportsService {
       passedChecks,
       issues,
       counts: {
-        missingBalances: missingBalances.length,
+        missingBalances: missingBalanceCount,
         pendingTrades: pendingTrades.length,
         pendingBalances: pendingBalances.length,
         missingEmails: missingEmails.length,
         returnedItems: totalReturned,
+        inceptionWarnings: inceptionAfterFirstTrade.length,
         totalActiveGroupHeads: groupHeads.length,
       },
       reportingRun: reportingRun
@@ -362,12 +496,48 @@ export class ReportsService {
     };
   }
 
-  async freezeReportingRun(
-    dto: FreezeReportingRunDto,
-    user: { id: string; name: string },
-  ) {
-    const period = dto.period.trim();
-    const monthKey = dto.monthKey || deriveMonthKeyFromPeriod(period);
+  async freezeReportingRun(dto: FreezeReportingRunDto, user: ReportsActor) {
+    const period = (dto.period || '').trim();
+    if (!/^\d{2}-\d{2}-\d{4}$/.test(period) || !tryParseDdMmYyyy(period)) {
+      throw new BadRequestException(
+        `Invalid reporting period "${dto.period}". Use the month-end date as dd-MM-yyyy (e.g. 30-09-2026).`,
+      );
+    }
+    const monthKey = deriveMonthKeyFromPeriod(period);
+    if (dto.monthKey && dto.monthKey.trim() !== monthKey) {
+      throw new BadRequestException(
+        `monthKey ${dto.monthKey} does not match reporting period ${period} (${monthKey}).`,
+      );
+    }
+
+    const overrideReason = resolveOverride(dto, user);
+
+    const existing = await this.prisma.reportingRun.findUnique({
+      where: { period },
+      select: { isFrozen: true },
+    });
+    if (existing?.isFrozen) {
+      throw new ConflictException(
+        `Reporting period ${period} is already frozen. Unfreeze it before freezing again.`,
+      );
+    }
+
+    // Server-side pre-flight gate (FR-3.3 / §8 steps 2–4): the same checks the UI
+    // shows. Freeze is global for the period, so every active Group Head is audited.
+    // A Manager / Super Admin may override with a logged justification.
+    const audit = await this.getPreFlightAudit(period, monthKey);
+    const blockers = audit.isReadyToFreeze ? [] : blockingIssues(audit.issues);
+    if (blockers.length > 0 && overrideReason === null) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        message: `Cannot freeze ${period}: ${blockers.length} pre-flight blocker${blockers.length === 1 ? '' : 's'} must be resolved first — ${blockers.map((b) => b.title).join('; ')}.`,
+        blockers,
+        counts: audit.counts,
+        overridable: true,
+      });
+    }
+    const overridden = blockers.length > 0;
 
     const run = await this.prisma.reportingRun.upsert({
       where: { period },
@@ -395,8 +565,24 @@ export class ReportsService {
         action: AuditAction.FROZEN,
         userId: user.id,
         userName: user.name,
-        reason:
-          'All pre-flight audits verified. Month-end ledger locked for reporting calculations.',
+        reason: overridden
+          ? `PRE-FLIGHT OVERRIDE (${blockers.length} blocker${blockers.length === 1 ? '' : 's'}): ${overrideReason}`
+          : 'All pre-flight audits verified. Month-end ledger locked for reporting calculations.',
+        changes: overridden
+          ? {
+              override: true,
+              gate: 'freeze',
+              overrideReason,
+              overriddenAt: new Date().toISOString(),
+              overriddenBy: {
+                userId: user.id,
+                displayName: user.name,
+                role: user.role ?? null,
+              },
+              blockers,
+              counts: audit.counts,
+            }
+          : undefined,
         reportingRunId: run.id,
       },
     });
@@ -409,6 +595,9 @@ export class ReportsService {
         userId: user.id,
         displayName: user.name,
       },
+      override: overridden
+        ? { reason: overrideReason, blockers, counts: audit.counts }
+        : null,
     };
   }
 
@@ -468,10 +657,11 @@ export class ReportsService {
    */
   async executeCalculationRun(
     dto: ExecuteCalculationRunDto,
-    user: { id: string; name: string },
+    user: ReportsActor,
   ) {
     const period = (dto.period || '30-09-2026').trim();
     const monthKey = dto.monthKey || deriveMonthKeyFromPeriod(period);
+    const overrideReason = resolveOverride(dto, user);
     await this.freezeService.assertPeriodFrozenForDispatch(period);
     const requestedId = (dto.groupHeadId || '').trim();
     const runAll =
@@ -503,6 +693,33 @@ export class ReportsService {
     }
 
     const targetIds = targetHeads.map((h) => h.id);
+
+    // FR-3.3 data-integrity gate: no calculation while mandatory closing balances
+    // are missing for the mandates being calculated. Same check as the freeze gate.
+    // A freeze override does NOT carry over: the run needs its own logged
+    // Manager / Super Admin override (forceOverride + overrideReason).
+    const balanceAudits = runAll
+      ? [await this.getPreFlightAudit(period, monthKey)]
+      : await Promise.all(
+          targetIds.map((id) => this.getPreFlightAudit(period, monthKey, id)),
+        );
+    const missingBalanceBlockers = balanceAudits
+      .flatMap((a) => blockingIssues(a.issues))
+      .filter((b) => b.type === 'missing_balance');
+    let calcOverride: { reason: string } | null = null;
+    if (missingBalanceBlockers.length > 0) {
+      if (overrideReason !== null) {
+        calcOverride = { reason: overrideReason };
+      } else {
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'Conflict',
+          message: `Cannot run the calculation for ${period}: mandatory closing balances are missing (FR-3.3) — ${missingBalanceBlockers.map((b) => b.title).join('; ')}.`,
+          blockers: missingBalanceBlockers,
+          overridable: true,
+        });
+      }
+    }
 
     const [
       approvedCashflows,
@@ -544,6 +761,10 @@ export class ReportsService {
       debtRatio: r.debtRatio,
     }));
 
+    let xirrPeriodsCount = 0;
+    let p2pPeriodsCount = 0;
+    let stagingRowsWritten = 0;
+
     for (const targetHead of targetHeads) {
       const headCfs = approvedCashflows
         .filter((c) => c.groupHeadId === targetHead.id)
@@ -570,6 +791,7 @@ export class ReportsService {
         .map((b) => ({
           srNo: b.srNo,
           dateOfEntry: b.dateOfEntry,
+          closingBalanceDate: b.closingBalanceDate,
           monthKey: b.monthKey,
           userId: b.userId,
           month: b.month,
@@ -601,6 +823,13 @@ export class ReportsService {
         indexQuotes,
       });
 
+      for (const row of computed.dashboard.summary) {
+        if (row.returnMethod === 'XIRR') xirrPeriodsCount += 1;
+        else if (row.returnMethod === 'AR') p2pPeriodsCount += 1;
+      }
+      stagingRowsWritten +=
+        computed.dashDataRows.length + computed.irrCalculatedRows.length;
+
       this.oTemplateEngine.populateWorkbook({
         groupHeadId: targetHead.id,
         dashboard: computed.dashboard,
@@ -621,12 +850,44 @@ export class ReportsService {
       cashflowCount: approvedCashflows.length,
       closingBalanceCount: approvedBalances.length,
       hybridOverridesApplied: customOverridesCount,
-      xirrPeriodsCount: 5,
-      p2pPeriodsCount: 1,
-      formulasUpdated: 18,
+      xirrPeriodsCount,
+      p2pPeriodsCount,
+      formulasUpdated: stagingRowsWritten,
       actor: user?.name || 'Operations Manager',
-      status: 'success' as const,
+      status: calcOverride ? ('warning' as const) : ('success' as const),
+      override: calcOverride
+        ? { ...calcOverride, blockers: missingBalanceBlockers }
+        : null,
     };
+
+    if (calcOverride) {
+      const run = await this.prisma.reportingRun.findUnique({
+        where: { period },
+        select: { id: true },
+      });
+      await this.prisma.auditTrail.create({
+        data: {
+          action: AuditAction.FROZEN,
+          userId: user.id,
+          userName: user.name,
+          reason: `CALCULATION OVERRIDE (missing closing balances): ${calcOverride.reason}`,
+          changes: {
+            override: true,
+            gate: 'calculate',
+            overrideReason: calcOverride.reason,
+            overriddenAt: new Date().toISOString(),
+            overriddenBy: {
+              userId: user.id,
+              displayName: user.name,
+              role: user.role ?? null,
+            },
+            groupHeadIds: targetIds,
+            blockers: missingBalanceBlockers,
+          },
+          reportingRunId: run?.id ?? null,
+        },
+      });
+    }
 
     await this.prisma.reportingRun.upsert({
       where: { period },
@@ -651,7 +912,7 @@ export class ReportsService {
         'Stage 1: Validated cashflow signs and fiscal period tags across all approved records.',
         'Stage 2: Injected approved cashflow and valuation records into O_Template workbook sheets.',
         'Stage 3: Transformed hybrid balances into synthetic Equity and Debt ledger lines.',
-        'Stage 4: Calculated 5 annual periods with XIRR and 1 partial period with Point-to-Point return.',
+        `Stage 4: Calculated ${xirrPeriodsCount} period${xirrPeriodsCount === 1 ? '' : 's'} with XIRR and ${p2pPeriodsCount} period${p2pPeriodsCount === 1 ? '' : 's'} with Point-to-Point return across ${targetHeads.length} mandate${targetHeads.length === 1 ? '' : 's'}.`,
         'Stage 5: Recalculated all summary formulas and benchmark comparison deltas successfully.',
       ],
     };
@@ -686,7 +947,7 @@ export class ReportsService {
         ? { groupHeadId: { in: activeHeadIds } }
         : {};
 
-    const [cashflows, closingBalances, hybridRules, indexRecords] =
+    const [ledgerCashflows, ledgerClosingBalances, hybridRules, indexRecords] =
       await Promise.all([
         this.prisma.masterCashflow.findMany({
           where: {
@@ -710,6 +971,43 @@ export class ReportsService {
           where: { indexCode: BenchmarkCode.NIFTY_50_TRI },
         }),
       ]);
+
+    // Requested From Period: respected when later than the data start, clamped
+    // (ignored) when earlier. Applied to the unfiltered mandate ledger.
+    let fromWindow: {
+      windowStart: string | null;
+      openingMonthKey: string | null;
+    };
+    try {
+      fromWindow = applyFromPeriodWindow({
+        cashflows: ledgerCashflows.map((c) => ({
+          transactionDate: c.transactionDate,
+        })),
+        closingBalances: ledgerClosingBalances.map((b) => ({
+          monthKey: b.monthKey,
+          dateOfEntry: b.dateOfEntry,
+          closingAmount: Number(b.closingAmount || 0),
+        })),
+        requestedFrom: query.fromPeriod,
+        toPeriod,
+      });
+    } catch (err) {
+      throw new BadRequestException((err as Error).message);
+    }
+    const windowStartDate = fromWindow.windowStart
+      ? parseDdMmYyyy(fromWindow.windowStart)
+      : null;
+    const cashflows = windowStartDate
+      ? ledgerCashflows.filter((c) => {
+          const dt = tryParseDdMmYyyy(c.transactionDate);
+          return dt === null || dt.getTime() >= windowStartDate.getTime();
+        })
+      : ledgerCashflows;
+    const closingBalances = fromWindow.openingMonthKey
+      ? ledgerClosingBalances.filter(
+          (b) => b.monthKey >= (fromWindow.openingMonthKey as string),
+        )
+      : ledgerClosingBalances;
 
     const mappedCfs = cashflows
       .filter(
@@ -755,7 +1053,7 @@ export class ReportsService {
       }));
 
     const fromPeriod = fromPeriodFromLedger({
-      explicit: query.fromPeriod,
+      explicit: fromWindow.windowStart ?? undefined,
       inceptionDate: groupHead?.inceptionDate,
       cashflowDates: mappedCfs.map((c) => c.transactionDate),
       closingBalances: mappedCbs,
@@ -766,6 +1064,22 @@ export class ReportsService {
       process.env.USE_REFERENCE_DASHBOARD === 'true' &&
       ['abc', 'dummy'].includes(groupHeadId.toLowerCase())
         ? groupHeadId.toLowerCase()
+        : null;
+
+    // Header From Period is client-level: computed from the unfiltered mandate so
+    // a category / family filtered view shows the same From Period as the All view.
+    const mandateStart = fromWindow.windowStart
+      ? parseDdMmYyyy(fromWindow.windowStart)
+      : groupHead
+        ? sinceInceptionStartDate({
+            cashflows,
+            closingBalances: closingBalances.map((b) => ({
+              monthKey: b.monthKey,
+              dateOfEntry: b.dateOfEntry,
+              closingAmount: Number(b.closingAmount || 0),
+            })),
+            toPeriod,
+          })
         : null;
 
     const computed = this.oTemplateEngine.computeMandateDashboard({
@@ -779,6 +1093,8 @@ export class ReportsService {
       inceptionDate: groupHead?.inceptionDate || fromPeriod,
       fromPeriod,
       toPeriod,
+      headerFromPeriod: mandateStart ? formatDdMmYyyy(mandateStart) : undefined,
+      windowFromPeriod: fromWindow.windowStart ?? undefined,
       // Snapshot months of the selected mandate before category/family filters, so a
       // category missing from a valuation month reads 0 instead of carrying forward.
       valuationMonthKeys: groupHead

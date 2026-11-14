@@ -29,6 +29,12 @@ export interface FySummaryRowPayload {
   newInvestments: number | null;
   xirr: number | null;
   nifty50Tri: number | null;
+  /**
+   * How the row's return was computed under the 12-month rule (REQUIREMENTS §6.1):
+   * 'XIRR' (>= 12 months) or 'AR' (Point-to-Point, < 12 months). null when the row
+   * has no computed return (opening line, total row, not computable).
+   */
+  returnMethod?: 'XIRR' | 'AR' | null;
   isMockNifty?: boolean;
   isTotalRow?: boolean;
 }
@@ -452,6 +458,18 @@ export class OTemplateEngine {
     inceptionDate: string;
     fromPeriod: string;
     toPeriod: string;
+    /**
+     * Client-level From Period for the header (dd-MM-yyyy). Category / family
+     * filtered views pass the unfiltered mandate's Since-Inception start so the
+     * header matches the All view; defaults to this run's own SI start.
+     */
+    headerFromPeriod?: string;
+    /**
+     * Requested From Period window start (dd-MM-yyyy, from applyFromPeriodWindow):
+     * the day after the opening valuation month. Ledger rows are already trimmed;
+     * the opening valuation seeds the first period and Since Inception.
+     */
+    windowFromPeriod?: string;
     totalAum?: number;
     netInvestment?: number;
     /**
@@ -586,14 +604,17 @@ export class OTemplateEngine {
         : valuationMonthKeys(closingBalances)
     ).filter((k) => k <= reportEndKey);
 
+    const windowFrom = params.windowFromPeriod || null;
     const ledgerFrom =
       this.earliestLedgerDate(cashflows, closingBalances) || '01-04-2017';
     const candidates = [fromPeriod, inceptionDate, ledgerFrom].filter(
       Boolean,
     ) as string[];
-    const effectiveFrom = candidates
-      .map((d) => ({ raw: d, t: parseDdMmYyyy(d).getTime() }))
-      .sort((a, b) => a.t - b.t)[0].raw;
+    const effectiveFrom =
+      windowFrom ??
+      candidates
+        .map((d) => ({ raw: d, t: parseDdMmYyyy(d).getTime() }))
+        .sort((a, b) => a.t - b.t)[0].raw;
 
     const periods = generateFiscalPeriods(effectiveFrom, effectiveTo);
 
@@ -632,10 +653,28 @@ export class OTemplateEngine {
             Math.min(...allDatedCashflows.map((c) => c.date.getTime())),
           )
         : parseDdMmYyyy(effectiveFrom);
+    // With a requested From Period window, the opening is the valuation just
+    // before the window (not the one before the first trade inside it).
     const siOpening = sumOpeningClosingBeforeDate({
       closingBalances,
-      beforeDate: firstCfDate,
+      beforeDate: windowFrom ? parseDdMmYyyy(windowFrom) : firstCfDate,
     });
+    if (windowFrom && siOpening) {
+      prevClosing = siOpening.amount;
+      hasPrevClosing = true;
+      for (const cat of ['MF', 'PMS', 'STOCKS'] as const) {
+        const catOpen = sumClosingBalancesAtPeriodEnd({
+          closingBalances,
+          snapshotMonthKeys,
+          periodEnd: siOpening.asOfDate,
+          category: cat,
+        });
+        if (catOpen !== null) {
+          prevClosingByCat[cat] = catOpen;
+          hasPrevByCat[cat] = true;
+        }
+      }
+    }
     if (siOpening) {
       // Excel From Period = first day after the opening valuation month (e.g. 01-04-2018)
       allDatedCashflows.unshift({
@@ -643,6 +682,17 @@ export class OTemplateEngine {
         amount: -siOpening.amount,
       });
     }
+    // Since-Inception window start = header From Period (Excel AddtnlInfo!B3):
+    // the day after the opening valuation month, else the first trade date.
+    // The FY that only carries the opening valuation (e.g. FY 2017-18 for a
+    // Mar-18 opening) is still printed as a value line, but is not part of the
+    // reporting period, so it must not set From Period (was 01-04-2017).
+    const siStartDate = siOpening
+      ? nextDay(siOpening.asOfDate)
+      : allDatedCashflows.length > 0
+        ? firstCfDate
+        : parseDdMmYyyy(effectiveFrom);
+    const siFromPeriod = formatDdMmYyyy(siStartDate);
 
     // Excel Net Investment = opening capital + Σ(purchases − redemptions)
     let totalNetInv = siOpening?.amount ?? 0;
@@ -696,6 +746,8 @@ export class OTemplateEngine {
 
       // 12-month rule must use category exposure start, not the full FY window.
       // First-year STOCK (etc.) often starts mid-FY (~120 days) → AR, not XIRR.
+      // If the category has an opening balance or its first transaction occurred in the
+      // first month of the FY (April), exposure covers the full annual period.
       const firstCfInPeriod =
         catCfs.length > 0
           ? new Date(
@@ -706,8 +758,13 @@ export class OTemplateEngine {
               ),
             )
           : p.startDate;
+      const isFirstMonthOfPeriod =
+        firstCfInPeriod.getUTCMonth() === p.startDate.getUTCMonth() &&
+        firstCfInPeriod.getUTCFullYear() === p.startDate.getUTCFullYear();
       const ruleStart =
-        hasOpening && opening > 0 ? p.startDate : firstCfInPeriod;
+        (hasOpening && opening > 0) || isFirstMonthOfPeriod
+          ? p.startDate
+          : firstCfInPeriod;
 
       const xirrVal = calculateXirr(vector);
       const arVal = calculateAbsoluteReturn({
@@ -755,7 +812,8 @@ export class OTemplateEngine {
 
       // Excel parity: FYs before the mandate has any data are not printed. The FY
       // whose only data is the opening valuation prints as a value line ("-" for
-      // New Investments / XIRR / Nifty) and is left out of the XIRR and allocation tables.
+      // New Investments / XIRR / Nifty) in summary, 0.00 across categories in XIRR,
+      // and calculates baseline asset allocation at period end.
       if (periodCfs.length === 0 && !hasPrevClosing) {
         if (closingVal !== null) {
           summaryRows.push({
@@ -764,7 +822,23 @@ export class OTemplateEngine {
             newInvestments: null,
             xirr: null,
             nifty50Tri: null,
+            returnMethod: null,
           });
+          xirrRows.push({
+            financialYear: p.fyLabel,
+            portfolio: 0,
+            mf: 0,
+            pms: 0,
+            stock: 0,
+          });
+          allocationRows.push(
+            this.allocationPercentsAtPeriodEnd(
+              closingBalances,
+              p.endDate,
+              hybridRules,
+              p.fyLabel,
+            ),
+          );
           prevClosing = closingVal;
           hasPrevClosing = true;
           for (const cat of ['MF', 'PMS', 'STOCKS'] as const) {
@@ -801,6 +875,7 @@ export class OTemplateEngine {
       }
 
       let resolvedValue: number | null = null;
+      let resolvedMethod: 'XIRR' | 'AR' | null = null;
       if (closingVal !== null) {
         const xirrVal = calculateXirr(periodVector);
         const arVal = calculateAbsoluteReturn({
@@ -821,12 +896,15 @@ export class OTemplateEngine {
                   ),
                 ),
               );
-        resolvedValue = resolveReturnBy12MonthRule({
+        const resolved = resolveReturnBy12MonthRule({
           startDate: ruleStart,
           endDate: p.endDate,
           xirrVal,
           arVal,
-        }).value;
+        });
+        resolvedValue = resolved.value;
+        resolvedMethod =
+          resolved.method === 'UNAVAILABLE' ? null : resolved.method;
         // Opening-only / insufficient signed vector → Excel shows 0.00
         if (resolvedValue === null) resolvedValue = 0;
       }
@@ -850,6 +928,7 @@ export class OTemplateEngine {
         newInvestments,
         xirr: resolvedValue,
         nifty50Tri: benchReturn,
+        returnMethod: resolvedMethod,
       });
 
       const mfRet = computeCategoryReturn(
@@ -918,13 +997,36 @@ export class OTemplateEngine {
       });
     }
 
-    // No valuation on/before the report date → SI return is not computable (show "-")
-    const siXirr =
-      terminalClosing === null ? null : calculateXirr(allDatedCashflows);
+    // No valuation on/before the report date → SI return is not computable (show "-").
+    // 12-month rule (REQUIREMENTS.md §6.1) applies to Since Inception as well:
+    // a mandate younger than 12 months shows Absolute Return, not annualised XIRR.
+    let siXirr: number | null = null;
+    let siMethod: 'XIRR' | 'AR' | null = null;
+    if (terminalClosing !== null) {
+      const siPurchases = cashflows
+        .filter((c) => c.transactionType.toUpperCase() !== 'REDEMPTION')
+        .reduce((acc, c) => acc + c.amounts, 0);
+      const siRedemptions = cashflows
+        .filter((c) => c.transactionType.toUpperCase() === 'REDEMPTION')
+        .reduce((acc, c) => acc + c.amounts, 0);
+      const siResolved = resolveReturnBy12MonthRule({
+        startDate: siStartDate,
+        endDate: parseDdMmYyyy(effectiveTo),
+        xirrVal: calculateXirr(allDatedCashflows),
+        arVal: calculateAbsoluteReturn({
+          openingBalance: siOpening?.amount ?? 0,
+          purchases: siPurchases,
+          redemptions: siRedemptions,
+          closingBalance: terminalClosing,
+        }),
+      });
+      siXirr = siResolved.value;
+      siMethod = siResolved.method === 'UNAVAILABLE' ? null : siResolved.method;
+    }
     const siBench = calculateCashflowWeightedBenchmarkReturn({
       cashflows: allDatedCashflows.filter((c) => c.amount < 0),
       indexQuotes,
-      periodStart: parseDdMmYyyy(effectiveFrom),
+      periodStart: siStartDate,
       periodEnd: parseDdMmYyyy(effectiveTo),
     });
 
@@ -935,6 +1037,7 @@ export class OTemplateEngine {
       effectiveFrom,
       effectiveTo,
       snapshotMonthKeys,
+      windowFrom,
     );
     const siPms = this.computeSinceInceptionCategoryReturn(
       cashflows,
@@ -943,6 +1046,7 @@ export class OTemplateEngine {
       effectiveFrom,
       effectiveTo,
       snapshotMonthKeys,
+      windowFrom,
     );
     const siStock = this.computeSinceInceptionCategoryReturn(
       cashflows,
@@ -951,6 +1055,7 @@ export class OTemplateEngine {
       effectiveFrom,
       effectiveTo,
       snapshotMonthKeys,
+      windowFrom,
     );
 
     const dynamicDashboard: FyDashboardResultPayload = {
@@ -958,8 +1063,8 @@ export class OTemplateEngine {
         groupHeadName: groupHeadName || 'Client Portfolio',
         familyMemberName: familyMember || 'All',
         category: category || 'All',
-        inceptionDate: inceptionDate || effectiveFrom,
-        fromPeriod: effectiveFrom,
+        inceptionDate: inceptionDate || siFromPeriod,
+        fromPeriod: params.headerFromPeriod || siFromPeriod,
         toPeriod: effectiveTo,
       },
       summary: [
@@ -969,6 +1074,7 @@ export class OTemplateEngine {
           newInvestments: null,
           xirr: siXirr,
           nifty50Tri: siBench,
+          returnMethod: siMethod,
         },
         ...summaryRows,
         {
@@ -1054,6 +1160,7 @@ export class OTemplateEngine {
     fromPeriod: string,
     toPeriod: string,
     snapshotMonthKeys?: string[],
+    windowFrom?: string | null,
   ): number | null {
     const catCfs = cashflows.filter(
       (cf) => normalizeAssetCategory(cf.category) === category,
@@ -1079,7 +1186,7 @@ export class OTemplateEngine {
         : start;
     const opening = sumOpeningClosingBeforeDate({
       closingBalances,
-      beforeDate: firstCatCf,
+      beforeDate: windowFrom ? parseDdMmYyyy(windowFrom) : firstCatCf,
       category,
     });
     if (opening) {
@@ -1110,8 +1217,10 @@ export class OTemplateEngine {
       redemptions,
       closingBalance: closing,
     });
+    // 12-month rule starts at the category's own inception: the day after its
+    // opening valuation, else its first trade (not the mandate's From Period).
     return resolveReturnBy12MonthRule({
-      startDate: opening ? nextDay(opening.asOfDate) : start,
+      startDate: opening ? nextDay(opening.asOfDate) : firstCatCf,
       endDate: end,
       xirrVal,
       arVal,
