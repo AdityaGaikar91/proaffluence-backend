@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -6,7 +7,16 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
+  MinLength,
+  ValidateIf,
 } from 'class-validator';
+
+/** Minimum length of a manager's justification for overriding a pre-flight gate. */
+export const OVERRIDE_REASON_MIN_LENGTH = 10;
+
+const trimString = ({ value }: { value: unknown }): unknown =>
+  typeof value === 'string' ? value.trim() : value;
 
 export const EXTERNAL_PDF_SLOTS = [
   'MF_SUMMARY',
@@ -55,10 +65,31 @@ export class FreezeReportingRunDto {
   @IsString()
   monthKey?: string;
 
-  @ApiPropertyOptional({ example: false })
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Manager/Admin only: freeze even though pre-flight blockers remain. Requires overrideReason; logged in the audit trail with the blockers.',
+  })
   @IsOptional()
   @IsBoolean()
   forceOverride?: boolean;
+
+  @ApiPropertyOptional({
+    example:
+      'Client confirmed PMS valuation by phone; statement arrives after dispatch deadline.',
+    description: `Required when forceOverride=true (min ${OVERRIDE_REASON_MIN_LENGTH} characters after trimming).`,
+  })
+  @Transform(trimString)
+  @ValidateIf((o: { forceOverride?: boolean }) => o.forceOverride === true)
+  @IsString()
+  @IsNotEmpty({
+    message: 'overrideReason is required when forceOverride is true.',
+  })
+  @MinLength(OVERRIDE_REASON_MIN_LENGTH, {
+    message: `overrideReason must be at least ${OVERRIDE_REASON_MIN_LENGTH} characters.`,
+  })
+  @MaxLength(1000)
+  overrideReason?: string;
 }
 
 export class UnfreezeReportingRunDto {
@@ -91,6 +122,30 @@ export class ExecuteCalculationRunDto {
   @IsOptional()
   @IsString()
   groupHeadId?: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Manager/Admin only: run even though closing balances are missing (FR-3.3). Not needed when the period was frozen with an override. Requires overrideReason.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  forceOverride?: boolean;
+
+  @ApiPropertyOptional({
+    description: `Required when forceOverride=true (min ${OVERRIDE_REASON_MIN_LENGTH} characters after trimming).`,
+  })
+  @Transform(trimString)
+  @ValidateIf((o: { forceOverride?: boolean }) => o.forceOverride === true)
+  @IsString()
+  @IsNotEmpty({
+    message: 'overrideReason is required when forceOverride is true.',
+  })
+  @MinLength(OVERRIDE_REASON_MIN_LENGTH, {
+    message: `overrideReason must be at least ${OVERRIDE_REASON_MIN_LENGTH} characters.`,
+  })
+  @MaxLength(1000)
+  overrideReason?: string;
 }
 
 export class GeneratePdfBatchDto {

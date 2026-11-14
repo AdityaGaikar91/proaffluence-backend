@@ -56,15 +56,17 @@ export class ReportsController {
   @Post('freeze')
   @Roles('manager', 'super_admin')
   @ApiOperation({
-    summary: 'Seal and freeze a month-end reporting run (Manager/Admin only)',
+    summary:
+      'Seal and freeze a month-end reporting run (Manager/Admin only). Rejected with 409 and a blockers list when pre-flight gates fail (missing closing balances, pending cashflow/closing approvals, missing client emails) or the period is already frozen. forceOverride=true with overrideReason (min 10 chars) freezes anyway and logs the reason and blockers in the audit trail.',
   })
   freezeReportingRun(
     @Body() dto: FreezeReportingRunDto,
-    @CurrentUser() user: { id: string; name: string },
+    @CurrentUser() user: { id: string; name: string; role?: string },
   ) {
     return this.reportsService.freezeReportingRun(dto, {
       id: user.id,
       name: user.name || 'Operations Manager',
+      role: user.role,
     });
   }
 
@@ -92,11 +94,12 @@ export class ReportsController {
   })
   executeCalculationRun(
     @Body() dto: ExecuteCalculationRunDto,
-    @CurrentUser() user: { id: string; name: string },
+    @CurrentUser() user: { id: string; name: string; role?: string },
   ) {
     return this.reportsService.executeCalculationRun(dto, {
       id: user.id,
       name: user.name || 'Operations Manager',
+      role: user.role,
     });
   }
 
