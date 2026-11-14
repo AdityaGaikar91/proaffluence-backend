@@ -4,6 +4,8 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../core/prisma/prisma.service';
 import { ReportingFreezeService } from '../core/reporting/reporting-freeze.service';
@@ -14,11 +16,18 @@ import { ReturnCashflowDto } from './dto/return-cashflow.dto';
 import { QueryCashflowDto } from './dto/query-cashflow.dto';
 import { ImportCashflowRowsDto } from './dto/import-cashflow.dto';
 import {
+  CashflowMathService,
+  CandidateCashflowRow,
+  CalculationResult,
+} from './cashflow-math.service';
+import { JobsService } from '../jobs/jobs.service';
+import {
   ApprovalStatus,
   AssetCategory,
   AuditAction,
   Prisma,
 } from '@prisma/client';
+
 import {
   parsePaginationParams,
   createPaginationMeta,
@@ -56,6 +65,9 @@ export class CashflowsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly freezeService: ReportingFreezeService,
+    private readonly mathService: CashflowMathService,
+    @Inject(forwardRef(() => JobsService))
+    private readonly jobsService: JobsService,
   ) {}
 
   /**
@@ -133,13 +145,81 @@ export class CashflowsService {
       const monthLabel =
         dto.Month?.trim() || deriveMonthFromDate(dto.Transaction_Date);
 
-      // 5. Create MasterCashflow entry
+      // 5. Derivative financial calculation (New_Investments, Profit_Loss, XIRR)
+      let calculatedNewInvestments = dto.New_Investments;
+      let calculatedProfitLoss = dto.Profit_Loss;
+      let calculatedXirr = dto.XIRR;
+
+      const hasExplicitOverrides =
+        dto.New_Investments !== undefined &&
+        dto.New_Investments !== null &&
+        dto.Profit_Loss !== undefined &&
+        dto.Profit_Loss !== null &&
+        dto.XIRR !== undefined &&
+        dto.XIRR !== null &&
+        (dto.New_Investments !== 0 || dto.Profit_Loss !== 0 || dto.XIRR !== 0);
+
+      if (!hasExplicitOverrides) {
+        const priorFlows = await tx.masterCashflow.findMany({
+          where: {
+            groupHeadId: groupHead.id,
+            familyMemberId: familyMember?.id ?? null,
+            category: dto.Category,
+            subCategory: { equals: dto.Sub_Category.trim(), mode: 'insensitive' },
+            voided: false,
+          },
+        });
+
+        const priorCandidates: CandidateCashflowRow[] = priorFlows.map((f) => ({
+          id: f.id,
+          transactionDate: f.transactionDate,
+          transactionType: f.transactionType,
+          groupHeadId: f.groupHeadId,
+          familyMemberId: f.familyMemberId,
+          category: f.category,
+          subCategory: f.subCategory,
+          amounts: Number(f.amounts),
+          newInvestments: null,
+          profitLoss: null,
+          xirr: null,
+        }));
+
+        const currentCandidate: CandidateCashflowRow = {
+          id: 'new-single-entry',
+          transactionDate: dto.Transaction_Date,
+          transactionType: dto.Transaction_Type,
+          groupHeadId: groupHead.id,
+          familyMemberId: familyMember?.id ?? null,
+          category: dto.Category,
+          subCategory: dto.Sub_Category,
+          amounts: dto.Amounts,
+          newInvestments: null,
+          profitLoss: null,
+          xirr: null,
+        };
+
+        const sequenceResults = this.mathService.processSequence(
+          [],
+          [...priorCandidates, currentCandidate],
+        );
+        const currentResult = sequenceResults[sequenceResults.length - 1];
+
+        calculatedNewInvestments = currentResult.newInvestments;
+        calculatedProfitLoss = currentResult.profitLoss;
+        calculatedXirr = currentResult.xirr;
+      }
+
+      // 6. Create MasterCashflow entry
+      const effectiveUserId = dto.User_Id?.trim()
+        ? dto.User_Id.trim().toUpperCase()
+        : (groupHead.pan || 'PAN-UNASSIGNED');
+
       try {
         const cashflow = await tx.masterCashflow.create({
           data: {
             srNo: assignedSrNo,
             dateOfEntry: dto.Date_Of_Entry,
-            userId: dto.User_Id || currentUser.id,
+            userId: effectiveUserId,
             month: monthLabel,
             clientOwner: dto.Client_Owner,
             groupHeadId: groupHead.id,
@@ -151,9 +231,9 @@ export class CashflowsService {
             category: dto.Category,
             subCategory: dto.Sub_Category,
             amounts: dto.Amounts,
-            newInvestments: dto.New_Investments ?? 0,
-            profitLoss: dto.Profit_Loss ?? 0,
-            xirr: dto.XIRR ?? 0,
+            newInvestments: calculatedNewInvestments ?? 0,
+            profitLoss: calculatedProfitLoss ?? 0,
+            xirr: calculatedXirr ?? 0,
             approvalStatus: ApprovalStatus.PENDING,
             voided: false,
             submittedById: currentUser.id,
@@ -162,13 +242,15 @@ export class CashflowsService {
           },
         });
 
-        // 6. Record Initial Audit Trail event
+        // 7. Record Initial Audit Trail event
         await tx.auditTrail.create({
           data: {
             action: AuditAction.CREATED,
             userId: currentUser.id,
             userName: actorName,
-            reason: 'Initial trade entry submitted via portal.',
+            reason: hasExplicitOverrides
+              ? 'Initial trade entry submitted via portal (with manual financial overrides).'
+              : 'Initial trade entry submitted via portal (with auto-calculated financial metrics).',
             cashflowId: cashflow.id,
             changes: {
               Sr_No: assignedSrNo,
@@ -176,6 +258,9 @@ export class CashflowsService {
               Transaction_Type: dto.Transaction_Type,
               Category: dto.Category,
               Sub_Category: dto.Sub_Category,
+              New_Investments: calculatedNewInvestments,
+              Profit_Loss: calculatedProfitLoss,
+              XIRR: calculatedXirr,
             },
           },
         });
@@ -332,7 +417,7 @@ export class CashflowsService {
 
     const actorName = currentUser.name || 'Staff User';
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const nextAmounts =
         dto.Amounts !== undefined ? dto.Amounts : Number(existing.amounts);
       const nextNewInvestments =
@@ -488,6 +573,22 @@ export class CashflowsService {
 
       return updated;
     });
+
+    // Enqueue downstream cascade recalculation in background
+    try {
+      await this.jobsService.enqueueCashflowRecalculate({
+        groupHeadId: result.groupHeadId,
+        familyMemberId: result.familyMemberId,
+        category: result.category,
+        subCategory: result.subCategory,
+        actorId: currentUser.id,
+        actorName,
+      });
+    } catch {
+      // Background worker enqueue failure is non-fatal to synchronous response
+    }
+
+    return result;
   }
 
   /**
@@ -506,7 +607,7 @@ export class CashflowsService {
 
     const actorName = currentUser.name || 'Manager User';
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.masterCashflow.update({
         where: { id },
         data: {
@@ -527,6 +628,22 @@ export class CashflowsService {
 
       return updated;
     });
+
+    // Enqueue downstream cascade recalculation in background
+    try {
+      await this.jobsService.enqueueCashflowRecalculate({
+        groupHeadId: existing.groupHeadId,
+        familyMemberId: existing.familyMemberId,
+        category: existing.category,
+        subCategory: existing.subCategory,
+        actorId: currentUser.id,
+        actorName,
+      });
+    } catch {
+      // Non-fatal
+    }
+
+    return result;
   }
 
   /**
@@ -857,7 +974,74 @@ export class CashflowsService {
         const startSrNo = (lastRecord?.srNo ?? 0) + 1;
         const endSrNo = startSrNo + rows.length - 1;
 
-        // E. Prepare In-Memory Entities with Application-Generated UUIDs
+        // E. Financial Derivative Pre-Calculation (New_Investments, Profit_Loss, XIRR)
+        const distinctGroupHeadIds = Array.from(
+          new Set(groupHeads.map((gh) => gh.id)),
+        );
+        const priorFlows = await tx.masterCashflow.findMany({
+          where: {
+            groupHeadId: { in: distinctGroupHeadIds },
+            voided: false,
+          },
+        });
+
+        const priorCandidates: CandidateCashflowRow[] = priorFlows.map((f) => ({
+          id: f.id,
+          transactionDate: f.transactionDate,
+          transactionType: f.transactionType,
+          groupHeadId: f.groupHeadId,
+          familyMemberId: f.familyMemberId,
+          category: f.category,
+          subCategory: f.subCategory,
+          amounts: Number(f.amounts),
+          newInvestments: null,
+          profitLoss: null,
+          xirr: null,
+        }));
+
+        const incomingCandidates: CandidateCashflowRow[] = rows.map((r, i) => {
+          const gh = headMap.get(r.Group_Head_Name.trim().toLowerCase())!;
+          const memMap = memberCache.get(gh.id)!;
+          const familyMemberId =
+            memMap.get(r.Family_Member_Name.trim().toLowerCase()) ?? null;
+
+          const hasExplicitOverrides =
+            r.New_Investments !== undefined &&
+            r.New_Investments !== null &&
+            r.Profit_Loss !== undefined &&
+            r.Profit_Loss !== null &&
+            r.XIRR !== undefined &&
+            r.XIRR !== null &&
+            (r.New_Investments !== 0 || r.Profit_Loss !== 0 || r.XIRR !== 0);
+
+          return {
+            id: `incoming-${i}`,
+            transactionDate: r.Transaction_Date,
+            transactionType: r.Transaction_Type,
+            groupHeadId: gh.id,
+            familyMemberId,
+            category: r.Category,
+            subCategory: r.Sub_Category,
+            amounts: r.Amounts,
+            newInvestments: hasExplicitOverrides ? r.New_Investments : null,
+            profitLoss: hasExplicitOverrides ? r.Profit_Loss : null,
+            xirr: hasExplicitOverrides ? r.XIRR : null,
+          };
+        });
+
+        const processedIncoming = this.mathService.processSequence(
+          [],
+          [...priorCandidates, ...incomingCandidates],
+        );
+
+        const calculatedByIncomingId = new Map<string, CalculationResult>();
+        for (const item of processedIncoming) {
+          if (item.id && item.id.startsWith('incoming-')) {
+            calculatedByIncomingId.set(item.id, item);
+          }
+        }
+
+        // F. Prepare In-Memory Entities with Application-Generated UUIDs
         const cashflowData: Prisma.MasterCashflowCreateManyInput[] = [];
         const auditData: Prisma.AuditTrailCreateManyInput[] = [];
         const importedIds: string[] = [];
@@ -876,8 +1060,21 @@ export class CashflowsService {
           const monthLabel =
             row.Month?.trim() || deriveMonthFromDate(row.Transaction_Date);
 
-          const effectiveUserId =
-            row.User_Id?.trim() || gh.pan || currentUser.id;
+          const effectiveUserId = row.User_Id?.trim()
+            ? row.User_Id.trim().toUpperCase()
+            : (gh.pan || 'PAN-UNASSIGNED');
+
+          const calc = calculatedByIncomingId.get(`incoming-${i}`);
+          const finalNewInvestments =
+            calc?.newInvestments !== undefined
+              ? calc.newInvestments
+              : row.New_Investments ?? 0;
+          const finalProfitLoss =
+            calc?.profitLoss !== undefined
+              ? calc.profitLoss
+              : row.Profit_Loss ?? 0;
+          const finalXirr =
+            calc?.xirr !== undefined ? calc.xirr : row.XIRR ?? 0;
 
           cashflowData.push({
             id: entityId,
@@ -896,9 +1093,9 @@ export class CashflowsService {
             category: row.Category,
             subCategory: row.Sub_Category,
             amounts: row.Amounts,
-            newInvestments: row.New_Investments ?? 0,
-            profitLoss: row.Profit_Loss ?? 0,
-            xirr: row.XIRR ?? 0,
+            newInvestments: finalNewInvestments,
+            profitLoss: finalProfitLoss,
+            xirr: finalXirr,
             approvalStatus: ApprovalStatus.PENDING,
             voided: false,
             submittedById: currentUser.id,
@@ -919,6 +1116,9 @@ export class CashflowsService {
               Transaction_Type: row.Transaction_Type,
               Category: row.Category,
               Sub_Category: row.Sub_Category,
+              New_Investments: finalNewInvestments,
+              Profit_Loss: finalProfitLoss,
+              XIRR: finalXirr,
             },
             timestamp: now,
           });

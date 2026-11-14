@@ -4,9 +4,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ReportsModule } from '../reports/reports.module';
 import { CommunicationsModule } from '../communications/communications.module';
 import { BenchmarksModule } from '../benchmarks/benchmarks.module';
+import { CashflowsModule } from '../cashflows/cashflows.module';
 import { PrismaModule } from '../core/prisma/prisma.module';
 import {
   QUEUE_BENCHMARK_SYNC,
+  QUEUE_CASHFLOW_RECALCULATE,
   QUEUE_EMAIL_DISPATCH,
   QUEUE_REPORT_CALCULATE,
   QUEUE_REPORT_PDF,
@@ -17,6 +19,7 @@ import { ReportCalculateProcessor } from './processors/report-calculate.processo
 import { ReportPdfProcessor } from './processors/report-pdf.processor';
 import { EmailDispatchProcessor } from './processors/email-dispatch.processor';
 import { BenchmarkSyncProcessor } from './processors/benchmark-sync.processor';
+import { CashflowRecalculateProcessor } from './processors/cashflow-recalculate.processor';
 
 @Module({
   imports: [
@@ -24,6 +27,7 @@ import { BenchmarkSyncProcessor } from './processors/benchmark-sync.processor';
     PrismaModule,
     forwardRef(() => ReportsModule),
     forwardRef(() => CommunicationsModule),
+    forwardRef(() => CashflowsModule),
     BenchmarksModule,
     BullModule.forRootAsync({
       imports: [ConfigModule],
@@ -55,6 +59,7 @@ import { BenchmarkSyncProcessor } from './processors/benchmark-sync.processor';
         },
       },
       { name: QUEUE_BENCHMARK_SYNC },
+      { name: QUEUE_CASHFLOW_RECALCULATE },
     ),
   ],
   controllers: [JobsController],
@@ -64,6 +69,7 @@ import { BenchmarkSyncProcessor } from './processors/benchmark-sync.processor';
     ReportPdfProcessor,
     EmailDispatchProcessor,
     BenchmarkSyncProcessor,
+    CashflowRecalculateProcessor,
   ],
   exports: [JobsService, BullModule],
 })

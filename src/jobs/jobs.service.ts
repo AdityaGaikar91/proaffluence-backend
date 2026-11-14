@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
   QUEUE_BENCHMARK_SYNC,
+  QUEUE_CASHFLOW_RECALCULATE,
   QUEUE_EMAIL_DISPATCH,
   QUEUE_REPORT_CALCULATE,
   QUEUE_REPORT_PDF,
@@ -17,7 +18,23 @@ export class JobsService {
     @InjectQueue(QUEUE_REPORT_PDF) private readonly pdfQueue: Queue,
     @InjectQueue(QUEUE_EMAIL_DISPATCH) private readonly emailQueue: Queue,
     @InjectQueue(QUEUE_BENCHMARK_SYNC) private readonly benchQueue: Queue,
+    @InjectQueue(QUEUE_CASHFLOW_RECALCULATE) private readonly cashflowQueue: Queue,
   ) {}
+
+  async enqueueCashflowRecalculate(params: {
+    groupHeadId: string;
+    familyMemberId?: string | null;
+    category: any;
+    subCategory: string;
+    actorId?: string;
+    actorName?: string;
+  }) {
+    const job = await this.cashflowQueue.add('recalculate', params, {
+      jobId: `recalc:${params.groupHeadId}:${params.subCategory}:${Date.now()}`,
+    });
+    this.logger.log(`Enqueued cashflow recalculate job ${job.id}`);
+    return { jobId: job.id, queue: QUEUE_CASHFLOW_RECALCULATE };
+  }
 
   async enqueueCalculate(params: {
     period: string;
