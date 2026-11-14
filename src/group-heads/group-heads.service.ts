@@ -14,6 +14,61 @@ import {
   parsePaginationParams,
   createPaginationMeta,
 } from '../core/pagination';
+import {
+  formatDdMmYyyy,
+  tryParseDdMmYyyy,
+} from '../reports/financial-math.util';
+
+type CashflowReader = Pick<Prisma.TransactionClient, 'masterCashflow'>;
+
+/** Earliest non-voided trade date per Group Head (dd-MM-yyyy strings are not sortable). */
+async function firstTradeDates(
+  db: CashflowReader,
+  groupHeadIds: string[],
+): Promise<Map<string, Date>> {
+  const out = new Map<string, Date>();
+  if (groupHeadIds.length === 0) return out;
+  const rows = await db.masterCashflow.findMany({
+    where: { groupHeadId: { in: groupHeadIds }, voided: false },
+    select: { groupHeadId: true, transactionDate: true },
+  });
+  for (const r of rows) {
+    const dt = tryParseDdMmYyyy(r.transactionDate);
+    if (!dt) continue;
+    const prev = out.get(r.groupHeadId);
+    if (!prev || dt.getTime() < prev.getTime()) out.set(r.groupHeadId, dt);
+  }
+  return out;
+}
+
+/**
+ * FR-1.2: Inception Date is the earliest investment date, so it may not be after
+ * the Group Head's first trade. A new Group Head has no trades: only the date
+ * itself is validated. Returns the normalised dd-MM-yyyy value.
+ */
+async function assertValidInceptionDate(
+  db: CashflowReader,
+  groupHeadId: string | null,
+  raw: string,
+): Promise<string> {
+  const value = raw.trim();
+  const inception = tryParseDdMmYyyy(value);
+  if (!inception) {
+    throw new BadRequestException(
+      `Inception Date "${value}" is not a valid date. Use dd-MM-yyyy (e.g. 04-04-2018).`,
+    );
+  }
+  if (!groupHeadId) return value;
+  const firstTrade = (await firstTradeDates(db, [groupHeadId])).get(
+    groupHeadId,
+  );
+  if (firstTrade && inception.getTime() > firstTrade.getTime()) {
+    throw new BadRequestException(
+      `Inception Date ${value} cannot be after this Group Head's first trade on ${formatDdMmYyyy(firstTrade)}. Use ${formatDdMmYyyy(firstTrade)} or earlier (FR-1.2).`,
+    );
+  }
+  return value;
+}
 
 @Injectable()
 export class GroupHeadsService {
@@ -93,6 +148,11 @@ export class GroupHeadsService {
         }),
       ]);
 
+    const firstTrades = await firstTradeDates(
+      this.prisma,
+      records.map((r) => r.id),
+    );
+
     // Format response ensuring frontend compatibility with string[] familyMembers and detailed members
     const formattedData = records.map((head) => ({
       id: head.id,
@@ -102,6 +162,9 @@ export class GroupHeadsService {
       email: head.email,
       secondaryEmail: head.secondaryEmail ?? undefined,
       inceptionDate: head.inceptionDate,
+      firstTradeDate: firstTrades.has(head.id)
+        ? formatDdMmYyyy(firstTrades.get(head.id) as Date)
+        : null,
       pan: head.pan,
       status: head.status,
       notes: head.notes ?? undefined,
@@ -160,6 +223,10 @@ export class GroupHeadsService {
       throw new NotFoundException(`Group Head with ID "${id}" was not found.`);
     }
 
+    const firstTrade = (await firstTradeDates(this.prisma, [groupHead.id])).get(
+      groupHead.id,
+    );
+
     return {
       id: groupHead.id,
       customId: groupHead.customId,
@@ -168,6 +235,7 @@ export class GroupHeadsService {
       email: groupHead.email,
       secondaryEmail: groupHead.secondaryEmail ?? undefined,
       inceptionDate: groupHead.inceptionDate,
+      firstTradeDate: firstTrade ? formatDdMmYyyy(firstTrade) : null,
       pan: groupHead.pan,
       status: groupHead.status,
       notes: groupHead.notes ?? undefined,
@@ -246,7 +314,14 @@ export class GroupHeadsService {
         memberNames.push(primaryContact);
       }
 
-      // 4. Create Group Head record
+      // 4. Validate Inception Date (a new mandate has no trades yet)
+      const inceptionDate = await assertValidInceptionDate(
+        tx,
+        null,
+        dto.inceptionDate,
+      );
+
+      // 5. Create Group Head record
       const categories: AssetCategory[] =
         dto.categories && dto.categories.length > 0
           ? dto.categories
@@ -259,7 +334,7 @@ export class GroupHeadsService {
           contactPerson: dto.contactPerson?.trim() || primaryContact,
           email: dto.email.trim().toLowerCase(),
           secondaryEmail: dto.secondaryEmail?.trim().toLowerCase() || null,
-          inceptionDate: dto.inceptionDate.trim(),
+          inceptionDate,
           pan: dto.pan.trim().toUpperCase(),
           status: dto.status || 'Active',
           notes: dto.notes?.trim() || null,
@@ -276,7 +351,7 @@ export class GroupHeadsService {
         },
       });
 
-      // 5. Record creation in Audit Trail if actorId exists
+      // 6. Record creation in Audit Trail if actorId exists
       if (actorId) {
         await tx.auditTrail.create({
           data: {
@@ -370,6 +445,9 @@ export class GroupHeadsService {
       }
 
       const newName = dto.name ? dto.name.trim() : existing.name;
+      const newInceptionDate = dto.inceptionDate
+        ? await assertValidInceptionDate(tx, id, dto.inceptionDate)
+        : existing.inceptionDate;
 
       // Update Group Head
       const updated = await tx.groupHead.update({
@@ -388,9 +466,7 @@ export class GroupHeadsService {
                 ? dto.secondaryEmail.trim().toLowerCase()
                 : null
               : existing.secondaryEmail,
-          inceptionDate: dto.inceptionDate
-            ? dto.inceptionDate.trim()
-            : existing.inceptionDate,
+          inceptionDate: newInceptionDate,
           pan: dto.pan ? dto.pan.trim().toUpperCase() : existing.pan,
           status: dto.status || existing.status,
           notes: dto.notes !== undefined ? dto.notes.trim() : existing.notes,
@@ -424,6 +500,17 @@ export class GroupHeadsService {
             userId: actorId,
             userName: actorName,
             reason: `Updated details for mandate "${updated.name}" (${updated.customId}).`,
+            ...(newInceptionDate !== existing.inceptionDate
+              ? {
+                  changes: {
+                    groupHeadId: id,
+                    inceptionDate: {
+                      from: existing.inceptionDate,
+                      to: newInceptionDate,
+                    },
+                  },
+                }
+              : {}),
           },
         });
       }
