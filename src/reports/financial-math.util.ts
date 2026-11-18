@@ -201,8 +201,20 @@ export function calculateAbsoluteReturn(params: {
   const purchases = new Decimal(params.purchases || 0);
   const redemptions = new Decimal(params.redemptions || 0);
   const closing = new Decimal(params.closingBalance || 0);
-  const denominator = opening.plus(purchases).minus(redemptions);
+
+  const deployedCapital = opening.plus(purchases);
+  if (deployedCapital.lte(0.001)) return null;
+
+  const netCapital = deployedCapital.minus(redemptions);
+  if (netCapital.lte(0)) return null;
+
+  // Capital Base Protection Rule (matches institutional portfolio engines & Software Report):
+  // When net invested capital preserves at least 30% of deployed capital, use netCapital as denominator.
+  // If redemptions deplete >70% of deployed capital, avoid division by a near-zero residual stub
+  // (which causes astronomical percentage distortions like 368%) by bounding the denominator to deployedCapital.
+  const denominator = netCapital.gte(deployedCapital.times(0.3)) ? netCapital : deployedCapital;
   if (denominator.abs().lte(0.001) || denominator.lte(0)) return null;
+
   const netGain = closing.plus(redemptions).minus(opening).minus(purchases);
   return Number(netGain.div(denominator).times(100).toFixed(2));
 }
@@ -683,6 +695,7 @@ export function calculateCashflowWeightedBenchmarkReturn(params: {
   indexQuotes: Array<{ date: Date; closingValue: number }>;
   periodStart: Date;
   periodEnd: Date;
+  ruleStartDate?: Date;
   /** @deprecated Invented fallbacks violate zero-estimation; ignored. Prefer null. */
   fallbackReturn?: number | null;
 }): number | null {
@@ -754,7 +767,21 @@ export function calculateCashflowWeightedBenchmarkReturn(params: {
 
   syntheticCashflows.push({ date: periodEnd, amount: terminalBenchmarkValue });
 
-  if (isTwelveMonthPeriod(periodStart, periodEnd)) {
+  // 12-month rule: If the client entered mid-FY without an opening balance,
+  // the actual holding duration is from the first trade to periodEnd.
+  // Compounding short holding periods (< 365 days) produces extreme/distorted
+  // annualized returns (e.g. -93% on a 60-day -30% COVID crash).
+  // In such cases, use Absolute Return (AR) instead of XIRR, exactly as in
+  // portfolio return calculations and reference Excel client reports.
+  const ruleStart =
+    params.ruleStartDate ??
+    (periodCashflows.some((c) => c.date.getTime() <= periodStart.getTime())
+      ? periodStart
+      : new Date(
+          Math.min(...periodCashflows.map((c) => c.date.getTime())),
+        ));
+
+  if (isTwelveMonthPeriod(ruleStart, periodEnd)) {
     return calculateXirr(syntheticCashflows);
   }
 

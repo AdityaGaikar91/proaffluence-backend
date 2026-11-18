@@ -876,6 +876,19 @@ export class OTemplateEngine {
 
       let resolvedValue: number | null = null;
       let resolvedMethod: 'XIRR' | 'AR' | null = null;
+      // 12-month rule starts at the first trade when there is no opening value
+      // (e.g. a category-filtered run whose category starts mid-FY), as in Excel.
+      const ruleStart =
+        (hasPrevClosing && prevClosing > 0) || periodCfs.length === 0
+          ? p.startDate
+          : new Date(
+              Math.min(
+                ...periodCfs.map((c) =>
+                  parseDdMmYyyy(c.transactionDate).getTime(),
+                ),
+              ),
+            );
+
       if (closingVal !== null) {
         const xirrVal = calculateXirr(periodVector);
         const arVal = calculateAbsoluteReturn({
@@ -884,18 +897,6 @@ export class OTemplateEngine {
           redemptions,
           closingBalance: closingVal,
         });
-        // 12-month rule starts at the first trade when there is no opening value
-        // (e.g. a category-filtered run whose category starts mid-FY), as in Excel.
-        const ruleStart =
-          (hasPrevClosing && prevClosing > 0) || periodCfs.length === 0
-            ? p.startDate
-            : new Date(
-                Math.min(
-                  ...periodCfs.map((c) =>
-                    parseDdMmYyyy(c.transactionDate).getTime(),
-                  ),
-                ),
-              );
         const resolved = resolveReturnBy12MonthRule({
           startDate: ruleStart,
           endDate: p.endDate,
@@ -920,6 +921,7 @@ export class OTemplateEngine {
         indexQuotes,
         periodStart: p.startDate,
         periodEnd: p.endDate,
+        ruleStartDate: ruleStart,
       });
 
       summaryRows.push({
@@ -1023,11 +1025,16 @@ export class OTemplateEngine {
       siXirr = siResolved.value;
       siMethod = siResolved.method === 'UNAVAILABLE' ? null : siResolved.method;
     }
+    const siBenchCashflows =
+      terminalClosing !== null && terminalClosing > 0
+        ? allDatedCashflows.slice(0, Math.max(0, allDatedCashflows.length - 1))
+        : allDatedCashflows;
     const siBench = calculateCashflowWeightedBenchmarkReturn({
-      cashflows: allDatedCashflows.filter((c) => c.amount < 0),
+      cashflows: siBenchCashflows,
       indexQuotes,
       periodStart: siStartDate,
       periodEnd: parseDdMmYyyy(effectiveTo),
+      ruleStartDate: siStartDate,
     });
 
     const siMf = this.computeSinceInceptionCategoryReturn(

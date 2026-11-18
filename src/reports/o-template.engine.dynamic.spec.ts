@@ -264,4 +264,35 @@ describe('OTemplateEngine dynamic dashboard', () => {
     const fy = dash.summary.find((r) => r.financialYear === 'FY 2021-22');
     expect(fy?.xirr).toBe(10);
   });
+
+  it('calculates Since Inception benchmark return taking both purchases and redemptions into account', () => {
+    const dash = new OTemplateEngine().computeMandateDashboard({
+      groupHeadId: 'test-head',
+      groupHeadName: 'test',
+      familyMember: 'All',
+      category: 'All',
+      inceptionDate: '01-01-2020',
+      fromPeriod: '01-01-2020',
+      toPeriod: '31-03-2022',
+      cashflows: [
+        cf(1, '01-01-2020', 'Purchase', 100000),
+        cf(2, '01-01-2021', 'Redemption', 50000),
+      ],
+      closingBalances: [
+        cb(1, '2020-03', 105000),
+        cb(2, '2021-03', 60000),
+        cb(3, '2022-03', 70000),
+      ],
+      hybridRules: [],
+      indexQuotes: [
+        { date: new Date('2020-01-01'), closingValue: 1000 },
+        { date: new Date('2021-01-01'), closingValue: 1200 },
+        { date: new Date('2022-03-31'), closingValue: 1500 },
+      ],
+    }).dashboard;
+
+    const si = dash.summary.find((r) => r.financialYear === 'Since Inception');
+    expect(si?.nifty50Tri).not.toBeNull();
+    expect(si?.nifty50Tri).toBeCloseTo(19.82, 1);
+  });
 });

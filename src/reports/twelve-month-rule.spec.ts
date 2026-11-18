@@ -264,6 +264,40 @@ describe('benchmark point-to-point uses the same AR denominator', () => {
     // gain = 480 + 600 - 1000 = 80 ; base = 1000 - 600 = 400 → 20%
     expect(result).toBe(20);
   });
+
+  it('switches to Absolute Return when client enters mid-FY without opening balance (holding < 365 days)', () => {
+    // Full FY calendar is 01-Apr-2019 to 31-Mar-2020, but investment is made on 15-Jan-2020 (77 days)
+    // Nifty index drops 30% from 100 to 70 during COVID correction
+    // Annualized XIRR over 77 days would blow up to ~ -82%, but 12-month rule enforces Absolute Return of -30%
+    const result = calculateCashflowWeightedBenchmarkReturn({
+      cashflows: [{ date: d('15-01-2020'), amount: -1_000_000 }],
+      indexQuotes: [
+        { date: d('31-03-2019'), closingValue: 100 },
+        { date: d('15-01-2020'), closingValue: 100 },
+        { date: d('31-03-2020'), closingValue: 70 },
+      ],
+      periodStart: d('01-04-2019'),
+      periodEnd: d('31-03-2020'),
+      ruleStartDate: d('15-01-2020'),
+    });
+    // Units = 1_000_000 / 100 = 10,000 units. Terminal = 10,000 * 70 = 700,000.
+    // AR = (700,000 - 1,000,000) / 1,000,000 = -30%
+    expect(result).toBe(-30);
+  });
+
+  it('auto-detects mid-FY holding period when ruleStartDate is not explicitly provided', () => {
+    const result = calculateCashflowWeightedBenchmarkReturn({
+      cashflows: [{ date: d('15-01-2020'), amount: -1_000_000 }],
+      indexQuotes: [
+        { date: d('31-03-2019'), closingValue: 100 },
+        { date: d('15-01-2020'), closingValue: 100 },
+        { date: d('31-03-2020'), closingValue: 70 },
+      ],
+      periodStart: d('01-04-2019'),
+      periodEnd: d('31-03-2020'),
+    });
+    expect(result).toBe(-30);
+  });
 });
 
 describe('engine: 12-month rule & AR denominator on dashboards', () => {
