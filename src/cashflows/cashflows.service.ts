@@ -26,6 +26,7 @@ import {
   AssetCategory,
   AuditAction,
   Prisma,
+  TransactionType,
 } from '@prisma/client';
 
 import {
@@ -284,7 +285,7 @@ export class CashflowsService {
    * Query all cashflows with status tabs, search, and pagination.
    */
   async findAll(query: QueryCashflowDto) {
-    const { statusTab = 'ALL', search, month, groupHeadName, category } = query;
+    const { statusTab = 'ALL', search, month, groupHeadName, category, columnFilters } = query;
     const { page, limit, skip, take, sortBy, sortOrder } =
       parsePaginationParams(query, 'srNo');
 
@@ -344,6 +345,85 @@ export class CashflowsService {
         { month: { contains: q, mode: 'insensitive' } },
         ...(!isNaN(asNum) ? [{ srNo: asNum }] : []),
       ];
+    }
+
+    if (columnFilters) {
+      try {
+        const filters: Array<{ id: string; value: unknown }> =
+          typeof columnFilters === 'string'
+            ? JSON.parse(columnFilters)
+            : columnFilters;
+
+        const COLUMN_MAP: Record<string, string> = {
+          Sr_No: 'srNo',
+          Date_Of_Entry: 'dateOfEntry',
+          User_Id: 'userId',
+          Month: 'month',
+          Client_Owner: 'clientOwner',
+          Group_Head_Name: 'groupHeadName',
+          Family_Member_Name: 'familyMemberName',
+          Transaction_Date: 'transactionDate',
+          Transaction_Type: 'transactionType',
+          Category: 'category',
+          Sub_Category: 'subCategory',
+          Amounts: 'amounts',
+          New_Investments: 'newInvestments',
+          Profit_Loss: 'profitLoss',
+          XIRR: 'xirr',
+        };
+
+        if (Array.isArray(filters)) {
+          for (const f of filters) {
+            const rawVal =
+              typeof f.value === 'string'
+                ? f.value.trim()
+                : String(f.value ?? '').trim();
+            if (!rawVal) continue;
+
+            const field = COLUMN_MAP[f.id] || f.id;
+
+            if (field === 'srNo') {
+              const num = parseInt(rawVal, 10);
+              if (!isNaN(num)) where.srNo = num;
+            } else if (field === 'transactionType') {
+              const typeUpper = rawVal.toUpperCase();
+              if (typeUpper.startsWith('PURCHASE')) {
+                where.transactionType = TransactionType.PURCHASE;
+              } else if (typeUpper.startsWith('REDEMPTION')) {
+                where.transactionType = TransactionType.REDEMPTION;
+              }
+            } else if (field === 'category') {
+              const catUpper = rawVal.toUpperCase();
+              if (
+                catUpper === 'STOCK' ||
+                catUpper === 'STOCKS' ||
+                catUpper === 'DIRECT EQUITY'
+              ) {
+                where.category = AssetCategory.STOCKS;
+              } else if (catUpper === 'MF' || catUpper === 'MUTUAL FUNDS') {
+                where.category = AssetCategory.MF;
+              } else if (catUpper === 'PMS') {
+                where.category = AssetCategory.PMS;
+              }
+            } else if (
+              [
+                'dateOfEntry',
+                'userId',
+                'month',
+                'clientOwner',
+                'groupHeadName',
+                'familyMemberName',
+                'transactionDate',
+                'subCategory',
+              ].includes(field)
+            ) {
+              (where as any)[field] = { contains: rawVal, mode: 'insensitive' };
+            }
+          }
+        }
+      } catch {
+        // Silently ignore malformed columnFilters
+      }
     }
 
     const sortField =

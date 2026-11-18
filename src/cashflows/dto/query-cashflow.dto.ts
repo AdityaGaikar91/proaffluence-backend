@@ -37,4 +37,11 @@ export class QueryCashflowDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   groupHeadName?: string;
+
+  @ApiPropertyOptional({
+    description: 'JSON stringified TanStack column filters [{ id, value }]',
+  })
+  @IsOptional()
+  @IsString()
+  columnFilters?: string;
 }
