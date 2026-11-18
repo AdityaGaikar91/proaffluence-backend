@@ -104,70 +104,10 @@ export class CommunicationsService {
       orderBy: { customId: 'asc' },
     });
 
-    const existingCount = await this.prisma.emailCampaign.count({
-      where: { reportDate },
-    });
-
-    if (existingCount > 0) return;
-
-    const allowFakeStatuses = process.env.NODE_ENV !== 'production';
-
     for (let i = 0; i < groupHeads.length; i++) {
       const head = groupHeads[i];
-      let status: EmailCampaignStatus = EmailCampaignStatus.DRAFT;
-      let approvedByName: string | null = null;
-      let approvedAt: Date | null = null;
-      let queuedAt: Date | null = null;
-      let sentAt: Date | null = null;
-      let failedAt: Date | null = null;
-      let failureReason: string | null = null;
-      let bounceCode: string | null = null;
-      let providerMessageId: string | null = null;
-      let retryCount = 0;
 
-      // Fake pipeline statuses only outside production (UI demos)
-      if (allowFakeStatuses) {
-        if (head.id === 'abc' || head.id === 'sharma') {
-          status = EmailCampaignStatus.READY;
-        } else if (head.id === 'singhania') {
-          status = EmailCampaignStatus.APPROVED;
-          approvedByName = 'Priya S. (Manager)';
-          approvedAt = new Date('2026-09-28T16:00:00Z');
-        } else if (head.id === 'mehta') {
-          status = EmailCampaignStatus.SENT;
-          approvedByName = 'Priya S. (Manager)';
-          approvedAt = new Date('2026-09-28T16:00:00Z');
-          queuedAt = new Date('2026-09-30T09:15:00Z');
-          sentAt = new Date('2026-09-30T09:30:00Z');
-          providerMessageId = 'msg_ses_9921_mehta';
-        } else if (head.id === 'kapoor') {
-          status = EmailCampaignStatus.QUEUED;
-          approvedByName = 'Priya S. (Manager)';
-          approvedAt = new Date('2026-09-28T16:00:00Z');
-          queuedAt = new Date('2026-09-30T09:15:00Z');
-          providerMessageId = 'msg_ses_9923_kapoor';
-        } else if (head.id === 'gupta') {
-          status = EmailCampaignStatus.FAILED;
-          approvedByName = 'Priya S. (Manager)';
-          approvedAt = new Date('2026-09-28T16:00:00Z');
-          queuedAt = new Date('2026-09-30T09:15:00Z');
-          failedAt = new Date('2026-09-30T09:31:00Z');
-          failureReason =
-            'SMTP socket timeout: Gateway unreachable after 15000ms';
-          retryCount = 1;
-        } else if (head.id === 'verma') {
-          status = EmailCampaignStatus.BOUNCED;
-          approvedByName = 'Priya S. (Manager)';
-          approvedAt = new Date('2026-09-28T16:00:00Z');
-          queuedAt = new Date('2026-09-30T09:15:00Z');
-          bounceCode =
-            '550 5.1.1 Host rejected: Recipient address rejected (User unknown)';
-          failureReason =
-            'Hard Bounce: Inactive client mailbox at destination domain';
-        }
-      }
-
-      const campaign = await this.prisma.emailCampaign.upsert({
+      await this.prisma.emailCampaign.upsert({
         where: {
           groupHeadId_reportDate: {
             groupHeadId: head.id,
@@ -178,43 +118,10 @@ export class CommunicationsService {
         create: {
           groupHeadId: head.id,
           reportDate,
-          status,
-          approvedByName,
-          approvedAt,
-          queuedAt,
-          sentAt,
-          failedAt,
-          failureReason,
-          bounceCode,
-          providerMessageId,
-          retryCount,
+          status: EmailCampaignStatus.DRAFT,
+          retryCount: 0,
         },
       });
-
-      if (
-        allowFakeStatuses &&
-        (status === EmailCampaignStatus.SENT ||
-          status === EmailCampaignStatus.QUEUED ||
-          status === EmailCampaignStatus.FAILED ||
-          status === EmailCampaignStatus.BOUNCED)
-      ) {
-        const safeName = head.name.replace(/\s+/g, '_');
-        await this.prisma.deliveryLog.create({
-          data: {
-            campaignId: campaign.id,
-            groupHeadId: head.id,
-            clientName: head.name,
-            recipientEmail: head.email || 'client@example.com',
-            attachmentFilename: `FY_Annual_Dashboard_${safeName}_${reportDate}.pdf`,
-            status,
-            provider: 'Nodemailer (SMTP Relay)',
-            providerMessageId,
-            failureReason,
-            bounceCode,
-            retryCount,
-          },
-        });
-      }
     }
   }
 
@@ -238,7 +145,7 @@ export class CommunicationsService {
 
     const rows = groupHeads.map((head) => {
       const c = campaignMap.get(head.id);
-      const email = head.id === 'khan' ? '' : head.email;
+      const email = (head.email || '').trim();
       const safeName = head.name.replace(/\s+/g, '_');
 
       return {
@@ -357,7 +264,7 @@ export class CommunicationsService {
 
     let updatedCount = 0;
     for (const head of heads) {
-      const email = head.id === 'khan' ? '' : head.email;
+      const email = (head.email || '').trim();
       if (!email || !email.trim() || !email.includes('@')) {
         continue;
       }
@@ -422,7 +329,7 @@ export class CommunicationsService {
 
     let approvedCount = 0;
     for (const c of eligible) {
-      const email = c.groupHead.id === 'khan' ? '' : c.groupHead.email;
+      const email = (c.groupHead.email || '').trim();
       if (!email || !email.trim() || !email.includes('@')) {
         continue;
       }
@@ -499,7 +406,7 @@ export class CommunicationsService {
       if (c.status !== EmailCampaignStatus.APPROVED) continue;
 
       const head = c.groupHead;
-      const email = head.id === 'khan' ? '' : head.email;
+      const email = (head.email || '').trim();
       if (!email || !email.trim() || !email.includes('@')) continue;
 
       // 1. Generate PAN-password-protected PDF (LibreOffice required — fail-closed)

@@ -3,6 +3,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { resolveSofficeBinary } from '../reports/pdf-generator.service';
 import Redis from 'ioredis';
 import { Public } from '../auth/decorators/public.decorator';
 import { HealthResponseDto } from './dto/health-response.dto';
@@ -77,9 +78,13 @@ export class HealthController {
     }
 
     try {
-      const { stdout } = await execFileAsync('soffice', ['--version'], {
-        timeout: 5000,
-      });
+      const { stdout } = await execFileAsync(
+        resolveSofficeBinary(),
+        ['--version'],
+        {
+          timeout: 5000,
+        },
+      );
       checks.libreoffice = { ok: true, detail: stdout.trim().slice(0, 80) };
     } catch (err: any) {
       checks.libreoffice = {
