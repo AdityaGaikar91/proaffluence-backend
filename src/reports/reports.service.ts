@@ -1319,6 +1319,8 @@ export class ReportsService {
 
     const panPassword = wbResult.groupHead?.pan || 'ABCDE1234F';
     const encrypted = params.encrypted ?? true;
+    const allowFallback =
+      process.env.PDF_STRICT_LIBREOFFICE === 'true' ? !encrypted : true;
     const pdfResult = await this.pdfGenerator.generateDashboardPdf({
       groupHeadId: wbResult.groupHead?.id || params.groupHeadId,
       groupHeadName: wbResult.groupHead?.name || params.groupHeadId,
@@ -1326,7 +1328,7 @@ export class ReportsService {
       workbookPath: wbResult.filePath,
       dashboard: wbResult.dashboard,
       encrypted,
-      allowFallback: !encrypted,
+      allowFallback,
     });
 
     return {

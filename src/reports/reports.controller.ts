@@ -330,4 +330,17 @@ export class ReportsController {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(result.buffer);
   }
+
+  @Get('excel/:groupHeadId')
+  @ApiOperation({
+    summary:
+      'Download the populated financial audit workbook (Excel .xlsx) with formulas for a Group Head',
+  })
+  async downloadAuditExcel(
+    @Param('groupHeadId') groupHeadId: string,
+    @Query('period') period: string | undefined,
+    @Res() res: Response,
+  ) {
+    return this.downloadPopulatedTemplate(groupHeadId, period, res);
+  }
 }

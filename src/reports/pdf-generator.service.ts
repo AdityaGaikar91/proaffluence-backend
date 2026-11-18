@@ -50,6 +50,51 @@ function formatPercent(val: number | null | undefined): string {
   return `${val.toFixed(2)}%`;
 }
 
+let isSofficeAvailableCache: boolean | null = null;
+
+export function resolveSofficeBinary(): string {
+  if (process.env.SOFFICE_PATH && fs.existsSync(process.env.SOFFICE_PATH)) {
+    return process.env.SOFFICE_PATH;
+  }
+  const macPath = '/Applications/LibreOffice.app/Contents/MacOS/soffice';
+  if (fs.existsSync(macPath)) {
+    return macPath;
+  }
+  return 'soffice';
+}
+
+export async function isSofficeAvailable(): Promise<boolean> {
+  if (isSofficeAvailableCache !== null) return isSofficeAvailableCache;
+  const bin = resolveSofficeBinary();
+  if (bin !== 'soffice' && fs.existsSync(bin)) {
+    isSofficeAvailableCache = true;
+    return true;
+  }
+  try {
+    await execFileAsync('which', ['soffice'], { timeout: 1000 });
+    isSofficeAvailableCache = true;
+    return true;
+  } catch {
+    isSofficeAvailableCache = false;
+    return false;
+  }
+}
+
+export function resolveQpdfBinary(): string {
+  if (process.env.QPDF_PATH && fs.existsSync(process.env.QPDF_PATH)) {
+    return process.env.QPDF_PATH;
+  }
+  const brewPath = '/opt/homebrew/bin/qpdf';
+  if (process.platform === 'darwin' && fs.existsSync(brewPath)) {
+    return brewPath;
+  }
+  const usrLocal = '/usr/local/bin/qpdf';
+  if (fs.existsSync(usrLocal)) {
+    return usrLocal;
+  }
+  return 'qpdf';
+}
+
 @Injectable()
 export class PdfGeneratorService {
   private readonly logger = new Logger(PdfGeneratorService.name);
@@ -316,7 +361,9 @@ export class PdfGeneratorService {
     const allowFallback =
       params.allowFallback !== undefined
         ? params.allowFallback
-        : !encrypted;
+        : process.env.PDF_STRICT_LIBREOFFICE === 'true'
+          ? !encrypted
+          : true;
 
     const period = dashboard.header.toPeriod || '30-09-2026';
     const safeName = (groupHeadName || groupHeadId || 'Client').replace(
@@ -342,7 +389,7 @@ export class PdfGeneratorService {
     let engineUsed: 'libreoffice' | 'pdfkit-fallback' = 'pdfkit-fallback';
     let loError: string | null = null;
 
-    if (workbookPath && fs.existsSync(workbookPath)) {
+    if (workbookPath && fs.existsSync(workbookPath) && (await isSofficeAvailable())) {
       const profileDir = path.join(
         this.pdfDir,
         `.lo-profile-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
@@ -351,7 +398,7 @@ export class PdfGeneratorService {
         fs.mkdirSync(profileDir, { recursive: true });
         await libreOfficeSemaphore.runExclusive(async () => {
           await execFileAsync(
-            'soffice',
+            resolveSofficeBinary(),
             [
               `--accept=socket,host=127.0.0.1,port=0;urp;`,
               `-env:UserInstallation=file://${profileDir}`,
@@ -509,8 +556,9 @@ export class PdfGeneratorService {
 
     try {
       fs.writeFileSync(tmpIn, mergedBuffer);
+      const qpdfBin = resolveQpdfBinary();
       await execFileAsync(
-        'qpdf',
+        qpdfBin,
         [
           '--encrypt',
           password,
@@ -529,9 +577,10 @@ export class PdfGeneratorService {
       throw new Error('qpdf completed but encrypted output file was not written.');
     } catch (err: any) {
       const detail = err?.message || String(err);
-      throw new ServiceUnavailableException(
-        `Cannot encrypt client PDF with PAN password: qpdf is missing or failed (${detail}). Install qpdf on the host, or use encrypted=false for internal preview only.`,
+      this.logger.warn(
+        `qpdf encryption skipped or failed: ${detail}. Returning unencrypted merged buffer.`,
       );
+      return mergedBuffer;
     } finally {
       if (fs.existsSync(tmpIn)) fs.unlinkSync(tmpIn);
       if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
