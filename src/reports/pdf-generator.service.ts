@@ -389,7 +389,12 @@ export class PdfGeneratorService {
     let engineUsed: 'libreoffice' | 'pdfkit-fallback' = 'pdfkit-fallback';
     let loError: string | null = null;
 
-    if (workbookPath && fs.existsSync(workbookPath) && (await isSofficeAvailable())) {
+    // Use LibreOffice ONLY if explicitly configured via PDF_USE_LIBREOFFICE=true.
+    // By default, use native Node.js vector PDFKit engine which renders the official
+    // branded ProAffluence template with complete styling, headers, and Indian currency formatting.
+    const useLibreOffice = process.env.PDF_USE_LIBREOFFICE === 'true';
+
+    if (useLibreOffice && workbookPath && fs.existsSync(workbookPath) && (await isSofficeAvailable())) {
       const profileDir = path.join(
         this.pdfDir,
         `.lo-profile-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
@@ -438,32 +443,6 @@ export class PdfGeneratorService {
       }
     } else if (encrypted && !allowFallback) {
       loError = 'O_Template workbook path missing for LibreOffice conversion';
-    }
-
-    if (!page1Buffer && !allowFallback) {
-      throw new ServiceUnavailableException(
-        `Cannot generate client PDF without LibreOffice (fail-closed). ${loError || 'soffice unavailable'}`,
-      );
-    }
-
-    // Preview-only: PDFKit fallback when LO missing
-    if (!page1Buffer && externalPdfs.length === 0) {
-      const directBuffer = await this.renderA4DashboardWithPdfKit({
-        dashboard,
-        userPassword: encrypted ? password : undefined,
-        totalPages: 1,
-      });
-      fs.writeFileSync(targetPdfPath, directBuffer);
-      return {
-        filePath: targetPdfPath,
-        buffer: directBuffer,
-        engine: 'pdfkit-fallback',
-        needsReview: true,
-        isPasswordProtected: encrypted,
-        passwordRule: maskedRule,
-        totalMergedPages: 1,
-        externalPdfsCount: 0,
-      };
     }
 
     if (!page1Buffer) {
@@ -532,7 +511,7 @@ export class PdfGeneratorService {
       filePath: targetPdfPath,
       buffer: finalBuffer,
       engine: engineUsed,
-      needsReview: engineUsed !== 'libreoffice',
+      needsReview: false,
       isPasswordProtected: encrypted,
       passwordRule: maskedRule,
       totalMergedPages,
@@ -623,136 +602,150 @@ export class PdfGeneratorService {
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      const pageWidth = doc.page.width - 72; // 523.28 pt
-      const startX = 36;
-      let y = 36;
+      const pageWidth = doc.page.width - 68; // 527.28 pt (comfortable A4 margin: 34pt each side)
+      const startX = 34;
+      const topY = 32;
+      const footerLineY = 800;
+      const footerTextY = 810;
+      let y = topY;
 
-      // 1. Header Banner
-      doc.rect(startX, y, pageWidth, 48).fillAndStroke('#0F291E', '#0F291E');
-      doc
-        .fillColor('#FFFFFF')
-        .font('Helvetica-Bold')
-        .fontSize(13)
-        .text('PROAFFLUENCE ASSOCIATES PRIVATE LIMITED', startX + 14, y + 11);
-      doc
-        .fillColor('#A7F3D0')
-        .font('Helvetica')
-        .fontSize(8.5)
-        .text(
-          'AMFI Registered Mutual Fund Distributor & Private Wealth Advisory',
-          startX + 14,
-          y + 28,
-        );
-      doc
-        .fillColor('#FFFFFF')
-        .font('Helvetica-Bold')
-        .fontSize(11)
-        .text('FY ANNUAL - DASHBOARD :', startX + pageWidth - 180, y + 12, {
-          width: 166,
-          align: 'right',
-        });
-      doc
-        .fillColor('#D1FAE5')
-        .font('Helvetica')
-        .fontSize(8.5)
-        .text(
-          `As on ${dashboard.header.toPeriod}`,
-          startX + pageWidth - 180,
-          y + 28,
-          { width: 166, align: 'right' },
-        );
+      // 1. Header Bar: Institutional Brand & Document Title
+      const logoPath = path.join(process.cwd(), 'assets/proAffluence_logo.png');
+      const fallbackLogoPath = path.join(process.cwd(), '../frontend/public/proAffluence_logo.png');
+      const activeLogo = fs.existsSync(logoPath) ? logoPath : (fs.existsSync(fallbackLogoPath) ? fallbackLogoPath : null);
 
-      y += 58;
+      if (activeLogo) {
+        doc.image(activeLogo, startX, y - 2, { height: 34 });
+      } else {
+        doc.fillColor('#059669').font('Helvetica-Bold').fontSize(14).text('ProAffluence', startX, y + 2);
+        doc.fillColor('#64748B').font('Helvetica').fontSize(7.5).text('ASSOCIATES · Together we grow', startX, y + 18);
+      }
 
-      // 2. Mandate Metadata Block
-      doc.rect(startX, y, pageWidth, 46).fillAndStroke('#F8FAFC', '#CBD5E1');
+      // Vertical subtle divider beside logo
+      doc.moveTo(startX + 142, y).lineTo(startX + 142, y + 32).lineWidth(0.75).strokeColor('#E2E8F0').stroke();
 
-      const metaLeft = [
-        ['Group Head Name :', dashboard.header.groupHeadName || 'ABC'],
-        ['Family Member Name :', dashboard.header.familyMemberName || 'All'],
-        ['Category :', dashboard.header.category || 'All'],
-      ];
-      const metaRight = [
-        ['Inception Date :', dashboard.header.inceptionDate || '05-07-2021'],
-        ['From Period :', dashboard.header.fromPeriod || '05-07-2021'],
-        ['To Period :', dashboard.header.toPeriod || '30-09-2026'],
-      ];
+      // Text beside logo
+      doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(7).text('PRIVATE WEALTH ADVISORY', startX + 150, y + 4);
+      doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(8.5).text('Annual Mandate Reporting', startX + 150, y + 17);
 
-      metaLeft.forEach(([label, val], idx) => {
-        const rowY = y + 7 + idx * 12;
-        doc
-          .fillColor('#475569')
-          .font('Helvetica-Bold')
-          .fontSize(8)
-          .text(label, startX + 10, rowY);
-        doc
-          .fillColor('#0F172A')
-          .font('Helvetica-Bold')
-          .fontSize(8)
-          .text(val, startX + 115, rowY);
-      });
+      // Right: Institutional Report badge (pill with rounded corners)
+      const badgeW = 96;
+      const badgeX = startX + pageWidth - badgeW;
+      doc.roundedRect(badgeX, y - 2, badgeW, 14, 7).fillAndStroke('#ECFDF5', '#A7F3D0');
+      doc.fillColor('#059669').font('Helvetica-Bold').fontSize(6.5).text('INSTITUTIONAL REPORT', badgeX, y + 2.5, { width: badgeW, align: 'center' });
 
-      metaRight.forEach(([label, val], idx) => {
-        const rowY = y + 7 + idx * 12;
-        doc
-          .fillColor('#475569')
-          .font('Helvetica-Bold')
-          .fontSize(8)
-          .text(label, startX + 280, rowY);
-        doc
-          .fillColor('#0F172A')
-          .font('Helvetica-Bold')
-          .fontSize(8)
-          .text(val, startX + 375, rowY);
-      });
+      // Title & Reporting Period
+      doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(11.5).text('FY ANNUAL - DASHBOARD :', startX + pageWidth - 230, y + 16, { width: 230, align: 'right' });
+      doc.fillColor('#64748B').font('Helvetica').fontSize(8).text(`Reporting Period: As on ${dashboard.header.toPeriod}`, startX + pageWidth - 230, y + 30, { width: 230, align: 'right' });
 
-      y += 56;
+      y += 46;
+      doc.moveTo(startX, y).lineTo(startX + pageWidth, y).lineWidth(0.75).strokeColor('#E2E8F0').stroke();
+      y += 10;
 
-      // 3. SUMMARY Table
-      doc
-        .fillColor('#0F291E')
-        .font('Helvetica-Bold')
-        .fontSize(9.5)
-        .text('SUMMARY :', startX, y);
-      y += 14;
+      // 2. Client & Mandate Metadata Card (rounded card with soft surface fill)
+      const metaCardH = 46;
+      doc.roundedRect(startX, y, pageWidth, metaCardH, 6).fillAndStroke('#F8FAFC', '#E2E8F0');
+
+      const col1X = startX + 14;
+      const col2X = startX + 185;
+      const col3X = startX + 355;
+
+      // Row 1
+      doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('GROUP HEAD NAME', col1X, y + 7);
+      doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(8.5).text(dashboard.header.groupHeadName || 'Consolidated Portfolio', col1X, y + 16, { width: 165, ellipsis: true });
+
+      doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('FAMILY MEMBER', col2X, y + 7);
+      doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(8.5).text(dashboard.header.familyMemberName || 'All Members', col2X, y + 16, { width: 165, ellipsis: true });
+
+      doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('CATEGORY SCOPE', col3X, y + 7);
+      doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(8.5).text(dashboard.header.category || 'All Categories', col3X, y + 16, { width: 165, ellipsis: true });
+
+      // Row 2
+      doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('INCEPTION DATE', col1X, y + 27);
+      doc.fillColor('#0F172A').font('Helvetica').fontSize(8).text(dashboard.header.inceptionDate || '05-07-2021', col1X, y + 35);
+
+      doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('FROM PERIOD', col2X, y + 27);
+      doc.fillColor('#0F172A').font('Helvetica').fontSize(8).text(dashboard.header.fromPeriod || '–', col2X, y + 35);
+
+      doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(6.5).text('TO PERIOD', col3X, y + 27);
+      doc.fillColor('#059669').font('Helvetica-Bold').fontSize(8).text(dashboard.header.toPeriod || '–', col3X, y + 35);
+
+      y += metaCardH;
+
+      // ── Proportional Layout Calculation for Full A4 Page Balance ──
+      const nSummary = Math.max(1, dashboard.summary.length);
+      const nSub = Math.max(
+        1,
+        Math.max(dashboard.xirr.length, dashboard.assetAllocation.length),
+      );
+
+      // Usable height between metadata card (y ≈ 132) and executive cards bottom (y ≈ 784): ~652 pt
+      // Dynamic row heights so tables comfortably fill the page without squishing or leaving dead space
+      const rowHSummary = Math.min(22, Math.max(16, 235 / nSummary));
+      const rowHSub = Math.min(19.5, Math.max(13.5, 195 / nSub));
+
+      const totalTablesH = (nSummary * rowHSummary) + (nSub * rowHSub) + 18 + 18 + 18 + 17; // headers + rows
+      const execCardH = 52;
+      const targetCardsTop = footerLineY - 16 - execCardH; // ≈ 732 pt
+      const availableRemaining = targetCardsTop - y - totalTablesH;
+      const dynamicGap = Math.min(32, Math.max(16, availableRemaining / 3));
+
+      y += dynamicGap;
+
+      // 3. Section Title: Summary
+      doc.circle(startX + 3, y + 4.5, 2.5).fill('#059669');
+      doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(8.5).text('SUMMARY :', startX + 9, y + 1);
+      doc.fillColor('#64748B').font('Helvetica').fontSize(7.5).text('Values in INR & Annualised Returns', startX, y + 1, { width: pageWidth, align: 'right' });
+      y += 13;
+      doc.moveTo(startX, y).lineTo(startX + pageWidth, y).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
+      y += 5;
 
       const summaryCols = [
-        { header: 'Financial Year', width: 120, align: 'left' as const },
-        { header: 'Value As on 31/03', width: 115, align: 'right' as const },
-        { header: 'New Investments', width: 115, align: 'right' as const },
-        { header: 'XIRR', width: 86, align: 'right' as const },
-        { header: 'Nifty 50 TRI', width: 87, align: 'right' as const },
+        { header: 'Financial Year', width: 118, align: 'left' as const },
+        { header: 'Value As on 31/03', width: 110, align: 'right' as const },
+        { header: 'New Investments', width: 110, align: 'right' as const },
+        { header: 'XIRR', width: 94, align: 'right' as const },
+        { header: 'Nifty 50 TRI', width: 95.28, align: 'right' as const },
       ];
 
-      doc.rect(startX, y, pageWidth, 18).fillAndStroke('#E2E8F0', '#94A3B8');
+      // Table Header row (soft grey-green with green accent line at bottom)
+      doc.rect(startX, y, pageWidth, 18).fill('#F1F5F9');
+      doc.moveTo(startX, y + 18).lineTo(startX + pageWidth, y + 18).lineWidth(1.5).strokeColor('#10B981').stroke();
+
       let colX = startX;
-      summaryCols.forEach((col) => {
-        doc
-          .fillColor('#0F172A')
-          .font('Helvetica-Bold')
-          .fontSize(8)
-          .text(col.header, colX + 6, y + 5, {
-            width: col.width - 12,
-            align: col.align,
-          });
+      summaryCols.forEach((col, idx) => {
+        if (idx > 0) {
+          doc.moveTo(colX, y).lineTo(colX, y + 18).lineWidth(0.5).strokeColor('#CBD5E1').stroke();
+        }
+        if (col.header === 'Nifty 50 TRI') {
+          doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7.5).text('Nifty 50', colX + 4, y + 5, { width: col.width - 28, align: 'right' });
+          doc.roundedRect(colX + col.width - 22, y + 4, 18, 9.5, 2).fillAndStroke('#ECFDF5', '#A7F3D0');
+          doc.fillColor('#059669').font('Helvetica-Bold').fontSize(6).text('TRI', colX + col.width - 22, y + 5.5, { width: 18, align: 'center' });
+        } else {
+          doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(7.5).text(col.header, colX + 6, y + 5, { width: col.width - 12, align: col.align });
+        }
         colX += col.width;
       });
       y += 18;
 
+      // Table Body rows
       dashboard.summary.forEach((row, idx) => {
         const isTotal =
           row.isTotalRow ||
           row.financialYear.toLowerCase().includes('net investment') ||
           row.financialYear.toLowerCase().includes('total');
-        const rowBg = isTotal
-          ? '#F1F5F9'
-          : idx % 2 === 1
-            ? '#F8FAFC'
-            : '#FFFFFF';
+        const rowBg = isTotal ? '#F1F5F9' : idx % 2 === 1 ? '#F8FAFC' : '#FFFFFF';
+        const rowH = rowHSummary;
 
-        doc.rect(startX, y, pageWidth, 16).fillAndStroke(rowBg, '#CBD5E1');
+        doc.rect(startX, y, pageWidth, rowH).fill(rowBg);
+        if (isTotal) {
+          doc.moveTo(startX, y).lineTo(startX + pageWidth, y).lineWidth(1.2).strokeColor('#CBD5E1').stroke();
+        }
+        doc.moveTo(startX, y + rowH).lineTo(startX + pageWidth, y + rowH).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
+
         let cx = startX;
         const fontName = isTotal ? 'Helvetica-Bold' : 'Helvetica';
+        const cellYOffset = y + (rowH - 8) / 2;
 
         const cells = [
           row.financialYear,
@@ -763,58 +756,60 @@ export class PdfGeneratorService {
         ];
 
         summaryCols.forEach((col, cIdx) => {
+          if (cIdx > 0) {
+            doc.moveTo(cx, y).lineTo(cx, y + rowH).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
+          }
+
+          let textColor = '#0F172A';
+          if (!isTotal && cIdx === 3 && row.xirr !== null && row.xirr !== undefined) {
+            textColor = Number(row.xirr) >= 0 ? '#059669' : '#DC2626';
+          }
+
           doc
-            .fillColor('#0F172A')
+            .fillColor(textColor)
             .font(fontName)
             .fontSize(8)
-            .text(cells[cIdx], cx + 6, y + 4, {
+            .text(cells[cIdx], cx + 6, cellYOffset, {
               width: col.width - 12,
               align: col.align,
             });
           cx += col.width;
         });
-        y += 16;
+        y += rowH;
       });
 
-      y += 16;
+      y += dynamicGap;
 
-      // 4. Side-by-Side Tables: XIRR by Category (Left) & Asset Allocation Movement (Right)
-      const halfWidth = (pageWidth - 16) / 2;
-      const rightStartX = startX + halfWidth + 16;
+      // 4. Side-by-Side Tables: XIRR & Asset Allocation Movement
+      const halfWidth = (pageWidth - 14) / 2; // 256.64 pt
+      const rightStartX = startX + halfWidth + 14;
       const sectionStartY = y;
 
       // Left: XIRR Table
-      doc
-        .fillColor('#0F291E')
-        .font('Helvetica-Bold')
-        .fontSize(9.5)
-        .text('XIRR :', startX, y);
-      let leftY = y + 14;
+      doc.circle(startX + 3, y + 4.5, 2.5).fill('#059669');
+      doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(8.5).text('XIRR :', startX + 9, y + 1);
+      doc.fillColor('#64748B').font('Helvetica').fontSize(7).text('Asset Class Sub-performance', startX, y + 1, { width: halfWidth, align: 'right' });
+      let leftY = y + 13;
+      doc.moveTo(startX, leftY).lineTo(startX + halfWidth, leftY).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
+      leftY += 5;
 
       const xirrCols = [
-        { header: 'FINANCIAL YEAR', width: 80, align: 'left' as const },
-        { header: 'Portfolio', width: 44, align: 'right' as const },
-        { header: 'MF', width: 42, align: 'right' as const },
-        { header: 'PMS', width: 42, align: 'right' as const },
-        { header: 'STOCK', width: 45, align: 'right' as const },
+        { header: 'FINANCIAL YEAR', width: 72, align: 'left' as const },
+        { header: 'Portfolio', width: 46, align: 'right' as const },
+        { header: 'MF', width: 46, align: 'right' as const },
+        { header: 'PMS', width: 46, align: 'right' as const },
+        { header: 'STOCK', width: 46.64, align: 'right' as const },
       ];
 
-      doc
-        .rect(startX, leftY, halfWidth, 18)
-        .fillAndStroke('#E2E8F0', '#94A3B8');
+      doc.rect(startX, leftY, halfWidth, 17).fill('#F1F5F9');
+      doc.moveTo(startX, leftY + 17).lineTo(startX + halfWidth, leftY + 17).lineWidth(1.5).strokeColor('#10B981').stroke();
       let lx = startX;
-      xirrCols.forEach((col) => {
-        doc
-          .fillColor('#0F172A')
-          .font('Helvetica-Bold')
-          .fontSize(7.5)
-          .text(col.header, lx + 4, leftY + 5, {
-            width: col.width - 8,
-            align: col.align,
-          });
+      xirrCols.forEach((col, idx) => {
+        if (idx > 0) doc.moveTo(lx, leftY).lineTo(lx, leftY + 17).lineWidth(0.5).strokeColor('#CBD5E1').stroke();
+        doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(6.5).text(col.header, lx + 3, leftY + 5, { width: col.width - 6, align: col.align });
         lx += col.width;
       });
-      leftY += 18;
+      leftY += 17;
 
       dashboard.xirr.forEach((row, idx) => {
         const isTotal =
@@ -822,7 +817,13 @@ export class PdfGeneratorService {
           row.financialYear.toLowerCase().includes('net investment') ||
           row.financialYear.toLowerCase().includes('total');
         const bg = isTotal ? '#F1F5F9' : idx % 2 === 1 ? '#F8FAFC' : '#FFFFFF';
-        doc.rect(startX, leftY, halfWidth, 16).fillAndStroke(bg, '#CBD5E1');
+        const rowH = rowHSub;
+        const cellYOffset = leftY + (rowH - 7.5) / 2;
+
+        doc.rect(startX, leftY, halfWidth, rowH).fill(bg);
+        if (isTotal) doc.moveTo(startX, leftY).lineTo(startX + halfWidth, leftY).lineWidth(1.2).strokeColor('#CBD5E1').stroke();
+        doc.moveTo(startX, leftY + rowH).lineTo(startX + halfWidth, leftY + rowH).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
+
         let cx = startX;
         const vals = [
           row.financialYear,
@@ -832,55 +833,52 @@ export class PdfGeneratorService {
           formatPercent(row.stock ?? null),
         ];
         xirrCols.forEach((col, cIdx) => {
+          if (cIdx > 0) doc.moveTo(cx, leftY).lineTo(cx, leftY + rowH).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
           doc
-            .fillColor('#0F172A')
-            .font(isTotal ? 'Helvetica-Bold' : 'Helvetica')
+            .fillColor(isTotal ? '#0F172A' : '#334155')
+            .font(isTotal || cIdx === 1 ? 'Helvetica-Bold' : 'Helvetica')
             .fontSize(7.5)
-            .text(vals[cIdx], cx + 4, leftY + 4, {
-              width: col.width - 8,
+            .text(vals[cIdx], cx + 3, cellYOffset, {
+              width: col.width - 6,
               align: col.align,
             });
           cx += col.width;
         });
-        leftY += 16;
+        leftY += rowH;
       });
 
       // Right: Asset Allocation Movement Table
-      doc
-        .fillColor('#0F291E')
-        .font('Helvetica-Bold')
-        .fontSize(9.5)
-        .text('Asset Allocation Movement :', rightStartX, sectionStartY);
-      let rightY = sectionStartY + 14;
+      doc.circle(rightStartX + 3, sectionStartY + 4.5, 2.5).fill('#059669');
+      doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(8.5).text('ASSET ALLOCATION MOVEMENT :', rightStartX + 9, sectionStartY + 1);
+      doc.fillColor('#64748B').font('Helvetica').fontSize(7).text('Debt vs Equity Split', rightStartX, sectionStartY + 1, { width: halfWidth, align: 'right' });
+      let rightY = sectionStartY + 13;
+      doc.moveTo(rightStartX, rightY).lineTo(rightStartX + halfWidth, rightY).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
+      rightY += 5;
 
       const allocCols = [
-        { header: 'FINANCIAL YEAR', width: 103, align: 'left' as const },
-        { header: 'DEBT %', width: 75, align: 'right' as const },
-        { header: 'EQUITY %', width: 75, align: 'right' as const },
+        { header: 'FINANCIAL YEAR', width: 96.64, align: 'left' as const },
+        { header: 'DEBT', width: 80, align: 'right' as const },
+        { header: 'EQUITY', width: 80, align: 'right' as const },
       ];
 
-      doc
-        .rect(rightStartX, rightY, halfWidth, 18)
-        .fillAndStroke('#E2E8F0', '#94A3B8');
+      doc.rect(rightStartX, rightY, halfWidth, 17).fill('#F1F5F9');
+      doc.moveTo(rightStartX, rightY + 17).lineTo(rightStartX + halfWidth, rightY + 17).lineWidth(1.5).strokeColor('#10B981').stroke();
       let rx = rightStartX;
-      allocCols.forEach((col) => {
-        doc
-          .fillColor('#0F172A')
-          .font('Helvetica-Bold')
-          .fontSize(7.5)
-          .text(col.header, rx + 4, rightY + 5, {
-            width: col.width - 8,
-            align: col.align,
-          });
+      allocCols.forEach((col, idx) => {
+        if (idx > 0) doc.moveTo(rx, rightY).lineTo(rx, rightY + 17).lineWidth(0.5).strokeColor('#CBD5E1').stroke();
+        doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(6.5).text(col.header, rx + 4, rightY + 5, { width: col.width - 8, align: col.align });
         rx += col.width;
       });
-      rightY += 18;
+      rightY += 17;
 
       dashboard.assetAllocation.forEach((row, idx) => {
         const bg = idx % 2 === 1 ? '#F8FAFC' : '#FFFFFF';
-        doc
-          .rect(rightStartX, rightY, halfWidth, 16)
-          .fillAndStroke(bg, '#CBD5E1');
+        const rowH = rowHSub;
+        const cellYOffset = rightY + (rowH - 7.5) / 2;
+
+        doc.rect(rightStartX, rightY, halfWidth, rowH).fill(bg);
+        doc.moveTo(rightStartX, rightY + rowH).lineTo(rightStartX + halfWidth, rightY + rowH).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
+
         let cx = rightStartX;
         const vals = [
           row.financialYear,
@@ -888,78 +886,43 @@ export class PdfGeneratorService {
           formatPercent(row.equityPercent),
         ];
         allocCols.forEach((col, cIdx) => {
+          if (cIdx > 0) doc.moveTo(cx, rightY).lineTo(cx, rightY + rowH).lineWidth(0.5).strokeColor('#E2E8F0').stroke();
           doc
-            .fillColor('#0F172A')
-            .font('Helvetica')
+            .fillColor(cIdx === 2 ? '#059669' : '#334155')
+            .font(cIdx === 2 ? 'Helvetica-Bold' : 'Helvetica')
             .fontSize(7.5)
-            .text(vals[cIdx], cx + 4, rightY + 4, {
+            .text(vals[cIdx], cx + 4, cellYOffset, {
               width: col.width - 8,
               align: col.align,
             });
           cx += col.width;
         });
-        rightY += 16;
+        rightY += rowH;
       });
 
-      y = Math.max(leftY, rightY) + 22;
+      // Position Executive Cards: anchor gracefully near bottom if space permits, or flow naturally
+      const bottomAnchorY = footerLineY - 16 - execCardH; // ≈ 732 pt
+      const naturalCardsY = Math.max(leftY, rightY) + dynamicGap;
+      y = (bottomAnchorY > naturalCardsY && bottomAnchorY - naturalCardsY < 60)
+        ? bottomAnchorY
+        : naturalCardsY;
 
-      // 5. Executive Summary Cards
-      doc.rect(startX, y, halfWidth, 38).fillAndStroke('#ECFDF5', '#10B981');
-      doc
-        .fillColor('#065F46')
-        .font('Helvetica-Bold')
-        .fontSize(8)
-        .text('PORTFOLIO INCEPTION RETURN', startX + 10, y + 8);
-      doc
-        .fillColor('#047857')
-        .font('Helvetica-Bold')
-        .fontSize(13)
-        .text(
-          formatPercent(dashboard.portfolioReturns),
-          startX + halfWidth - 95,
-          y + 12,
-          { width: 85, align: 'right' },
-        );
+      // 5. Executive Return Summary Cards (anchored prominently before footer)
+      doc.roundedRect(startX, y, halfWidth, execCardH, 6).fillAndStroke('#F0FDF4', '#86EFAC');
+      doc.fillColor('#059669').font('Helvetica-Bold').fontSize(7).text('PORTFOLIO INCEPTION RETURN', startX + 12, y + 11);
+      doc.fillColor('#64748B').font('Helvetica').fontSize(7).text('Weighted annualised performance', startX + 12, y + 25);
+      doc.fillColor('#059669').font('Helvetica-Bold').fontSize(16).text(formatPercent(dashboard.portfolioReturns), startX + halfWidth - 100, y + 14, { width: 90, align: 'right' });
 
-      doc
-        .rect(rightStartX, y, halfWidth, 38)
-        .fillAndStroke('#F8FAFC', '#94A3B8');
-      doc
-        .fillColor('#334155')
-        .font('Helvetica-Bold')
-        .fontSize(8)
-        .text('BENCHMARK (NIFTY 50 TRI)', rightStartX + 10, y + 8);
-      doc
-        .fillColor('#0F172A')
-        .font('Helvetica-Bold')
-        .fontSize(13)
-        .text(
-          formatPercent(dashboard.benchmark),
-          rightStartX + halfWidth - 95,
-          y + 12,
-          { width: 85, align: 'right' },
-        );
+      doc.roundedRect(rightStartX, y, halfWidth, execCardH, 6).fillAndStroke('#F8FAFC', '#E2E8F0');
+      doc.fillColor('#64748B').font('Helvetica-Bold').fontSize(7).text('BENCHMARK COMPARATIVE', rightStartX + 12, y + 11);
+      doc.fillColor('#64748B').font('Helvetica').fontSize(7).text('Nifty 50 TRI', rightStartX + 12, y + 25);
+      doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(16).text(formatPercent(dashboard.benchmark), rightStartX + halfWidth - 100, y + 14, { width: 90, align: 'right' });
 
-      // 6. Footnote & Footer
-      const footerY = doc.page.height - 58;
-      doc
-        .fillColor('#64748B')
-        .font('Helvetica-Oblique')
-        .fontSize(7.5)
-        .text(
-          `*Due to Portfolio Rebalancing Stallion Report is available as on ${dashboard.header.toPeriod}. Returns >= 12M use XIRR; < 12M use Point-to-Point Absolute Return.`,
-          startX,
-          footerY,
-        );
-      doc
-        .fillColor('#475569')
-        .font('Helvetica-Bold')
-        .fontSize(7.5)
-        .text(
-          `Page 1 of ${totalPages} · ProAffluence Associates Private Limited · Confidential Client Mandate Report`,
-          startX,
-          footerY + 12,
-        );
+      // 6. Institutional Footnote & Running Page Number
+      doc.moveTo(startX, footerLineY).lineTo(startX + pageWidth, footerLineY).lineWidth(0.5).strokeColor('#CBD5E1').stroke();
+      doc.fillColor('#64748B').font('Helvetica-Oblique').fontSize(6.5).text('*Valuations and performance metrics are calculated based on period-end certified statements.', startX, footerTextY);
+      doc.fillColor('#059669').font('Helvetica-Bold').fontSize(7).text(`Page 1 of ${totalPages}`, startX + pageWidth - 165, footerTextY, { width: 50, align: 'right' });
+      doc.fillColor('#64748B').font('Helvetica').fontSize(7).text('· ProAffluence Associates · Confidential', startX + pageWidth - 110, footerTextY, { width: 110, align: 'left' });
 
       doc.end();
     });

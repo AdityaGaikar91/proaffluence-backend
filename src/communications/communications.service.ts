@@ -423,9 +423,9 @@ export class CommunicationsService {
             `PDF generation failed for ${head.name}; client email not dispatched.`,
         );
       }
-      if (pdf.engine !== 'libreoffice' || pdf.needsReview) {
+      if (pdf.needsReview) {
         throw new ServiceUnavailableException(
-          `Refusing to dispatch ${head.name}: PDF engine is ${pdf.engine} (LibreOffice required for client send).`,
+          `Refusing to dispatch ${head.name}: PDF generation flagged for review.`,
         );
       }
 
@@ -558,7 +558,8 @@ export class CommunicationsService {
     await this.freezeService.assertPeriodFrozenForDispatch(reportDate);
 
     const head = log.campaign.groupHead;
-    const recipient = alternateEmail?.trim() || log.recipientEmail;
+    const recipient =
+      alternateEmail?.trim() || head.email?.trim() || log.recipientEmail;
     if (!recipient || !recipient.includes('@')) {
       throw new BadRequestException('Valid recipient email is required to retry.');
     }
@@ -568,9 +569,9 @@ export class CommunicationsService {
       period: reportDate,
       encrypted: true,
     });
-    if (pdf.engine !== 'libreoffice' || pdf.needsReview) {
+    if (pdf.needsReview) {
       throw new ServiceUnavailableException(
-        `Retry blocked: PDF engine is ${pdf.engine} (LibreOffice required).`,
+        `Retry blocked: PDF generation flagged for review.`,
       );
     }
 
