@@ -5,6 +5,7 @@ import {
   IsEmail,
   IsOptional,
   IsString,
+  ValidateIf,
 } from 'class-validator';
 
 export class CampaignBatchActionDto {
@@ -25,7 +26,9 @@ export class CampaignBatchActionDto {
 }
 
 export class RerouteDeliveryLogDto {
-  @ApiProperty({ example: 'updated.client@example.com' })
+  @ApiPropertyOptional({ example: 'updated.client@example.com' })
+  @IsOptional()
+  @ValidateIf((o) => !!o.alternateEmail && typeof o.alternateEmail === 'string' && o.alternateEmail.trim() !== '')
   @IsEmail()
-  alternateEmail: string;
+  alternateEmail?: string;
 }
