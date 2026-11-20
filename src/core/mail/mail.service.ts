@@ -24,10 +24,20 @@ export class MailService {
 
   constructor(private readonly configService: ConfigService) {
     const host = this.configService.get<string>('SMTP_HOST');
-    const port = this.configService.get<number>('SMTP_PORT', 587);
+    const rawPort = this.configService.get<string | number>('SMTP_PORT', 587);
+    const port = Number(rawPort) || 587;
     const user = this.configService.get<string>('SMTP_USER');
     const pass = this.configService.get<string>('SMTP_PASS');
-    const secure = this.configService.get<boolean>('SMTP_SECURE', false);
+    const rawSecure = this.configService.get<string | boolean>('SMTP_SECURE', false);
+
+    // Port 465 requires secure: true (direct SMTPS).
+    // Port 587 (Submission) and Port 25 require secure: false (STARTTLS).
+    // In NestJS, .env values are strings ("false" is truthy in JS), so explicitly parse boolean string.
+    const isExplicitSecure =
+      rawSecure === true ||
+      rawSecure === 'true' ||
+      rawSecure === '1';
+    const secure = port === 465 || (isExplicitSecure && port !== 587 && port !== 25);
 
     this.defaultFrom =
       this.configService.get<string>(
@@ -41,8 +51,11 @@ export class MailService {
         port,
         secure,
         auth: { user, pass },
+        tls: {
+          rejectUnauthorized: false,
+        },
       });
-      this.logger.log(`SMTP Mailer initialized with host: ${host}:${port}`);
+      this.logger.log(`SMTP Mailer initialized with host: ${host}:${port} (secure=${secure})`);
     } else {
       this.logger.log(
         'No SMTP credentials configured. Mailer running in Development Console mode.',
